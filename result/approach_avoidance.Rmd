@@ -1,0 +1,1142 @@
+---
+title: "Approach and Avoidance in Online Dating Experience and Success"
+author: "Sue"
+output: 
+  html_document:
+    code_folding: hide
+    theme: cosmo
+    highlight: tango
+    toc: true
+    toc_float: 
+      collapsed: false
+      smooth_scroll: false
+    df_print: paged
+    fig_width: 8
+    fig_height: 5
+  word_document: default
+---
+
+```{r setup, include=FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, cache = FALSE, highlight = TRUE)
+library("tidyverse"); library("corrr"); library("broom"); library("lavaan")
+options(digits = 3, scipen = 999)
+set.seed(33333)
+```
+
+```{r data_import, message = FALSE, include=FALSE}
+here::here("data") %>%
+  list.files()  %>%
+  purrr::map(function(file_name) {
+    assign(x = str_remove(file_name, "_anonymized_processed_data.csv"),
+           value = readr::read_csv(paste(here::here("data"), sep = "/", file_name)),
+           envir = .GlobalEnv)
+  })
+```
+
+
+```{r message = FALSE, include = FALSE}
+list.files(path = here::here("r-scripts"),
+           pattern = "*.R",
+           full.names = T) %>%
+  purrr::map(~source(.)) 
+```
+
+```{r data_cleaning}
+# participant exclusion criteria
+# study 2
+s2a <- s2a %>%
+  mutate(exclusion = case_when(
+    attn_check == "pass" &
+      var_low == "acceptable" &
+      duplicate == "nonduplicated" ~ "eligible",
+    TRUE ~ "ineligible"))
+# study 3
+s2b <- s2b %>%
+  mutate(exclusion = case_when(
+    attn_check == "pass" ~ "eligible",
+    TRUE ~ "ineligible"))
+# study 4
+s3 <- s3 %>%
+  mutate(exclusion = case_when(
+    attn_check == "pass" &
+      duplicate == "nonduplicated" ~ "eligible",
+    TRUE ~ "ineligible"))
+
+# follow-up study
+# making column names in S4 consistent with the other datasets
+s4 <- s4 %>% 
+  rename(fit_ease = "ease",
+         fit_engage = "engagement",
+         fit_success = "ods") %>% 
+  mutate(gender = recode_factor(gender, 
+                                man = "male", woman = "female", nonbinary = "nonbinary", 
+                                .missing = "other")) 
+```
+
+```{r}
+# creating an aggregate score for all 3 bas subscales
+s4 <- s4 %>% 
+  mutate(bas = s4 %>% 
+           select(starts_with("bas"), -bas_reward, -bas_drive, -bas_fun) %>% 
+           # psych::alpha(check.keys = T)
+           rowMeans(na.rm = T))
+```
+
+```{r data_scoring}
+# scoring key variables: engage, ease, success_strategy, ods
+source(here::here("data_analysis", "data_prep", "item_scoring.R"))
+```
+
+
+# Method  
+## Participants  
+```{r sample_size}
+n_1to4 <- list(s1, s2a, s2b, s3, s4) %>% 
+  map(count, exclusion) %>% 
+  map_dfr(filter, exclusion == "eligible", .id = "study") %>% 
+  pull(n)
+```
+
+```{r}
+list(s1, s2a, s2b, s3, s4) %>% 
+  map_dfr(count, exclusion, .id = "study") %>% 
+  spread(exclusion, n) %>% 
+  mutate(exclusion_rate = (ineligible/(eligible+ineligible))*100)
+```
+
+
+```{r demo_age}
+list(s1, s2a, s2b, s3, s4) %>% 
+  map_dfr(demo_age, .id = "study") %>% 
+  filter(exclusion == "eligible") 
+  
+```
+
+```{r demo_gender}
+list(s1, s2a, s2b, s3, s4) %>% 
+  map_dfr(count, exclusion, gender, .id = "study") %>% 
+  spread(gender, n) %>% 
+  filter(exclusion == "eligible") %>% 
+  mutate(prop_female = (female / (female + male)*100))
+```
+
+
+```{r demo_ethnicity}
+list(s1, s2a, s2b, s3, s4) %>% 
+  map(ethnicity)
+```
+
+
+## Measures  
+
+### RFQ in relationships
+Prevention focus
+```{r}
+list(s1, s2a, s2b, s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, matches("^RFQ_M_[1-7]")) %>% # prevention items
+  map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "Study")
+```
+
+Promotion focus
+```{r}
+list(s1, s2a, s2b, s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, paste("RFQ_M", 8:15, sep = "_")) %>% # promotion items
+  map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "Study")
+```
+### BIS/BAS
+BIS
+```{r}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  dplyr::select(matches("^bis_[0-9]")) %>% # bis-items
+  psych::alpha(check.keys = TRUE)
+```
+BAS
+```{r}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  dplyr::select(matches("^bas\\w_")) %>% # bas items
+  psych::alpha(check.keys = TRUE)
+```
+
+#### r(social motives)
+```{r}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  dplyr::select(promotion, bas, rfq_prom, prevention, bis, rfq_prev) %>% 
+  corrr::correlate()
+```
+```{r}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  dplyr::select(promotion, bas) %>% 
+  cor.test(~promotion + bas, data = .)
+```
+
+```{r}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  dplyr::select(prevention, bis) %>% 
+  cor.test(~prevention + bis, data = .)
+```
+
+
+### Online Dating
+#### Engagement & Ease
+Engagement
+s2a: "overall_engagement"; s2b-s4: "engage"
+
+```{r}
+list(s2a, s2b, s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, matches("^engage_[1-3]")| matches("^overall_engagement_[1-3]")) %>% 
+  map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "Study")
+```
+Ease 
+```{r}
+list(s2a, s2b, s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, matches("^ease_[1-2|4]")| matches("^overall_ease_[1|3|5]")) %>% 
+  map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "Study")
+```
+#### Success
+```{r}
+list(s1, s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, matches("^suc_[0-9]{1,2}")) %>% 
+  map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "Study")
+```
+
+
+
+
+### approach
+```{r}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  select(promotion, rfq_prom,  bas) %>% 
+  corrr::correlate()
+```
+GRFQ correlated with bas, $r$ = .41.
+Higgins' RFQ correlated with BAS, $r$ = .27. 
+
+### avoidance
+```{r}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  select(prevention, rfq_prev, bis) %>% 
+  corrr::correlate()
+```
+GRFQ correlated with bis, $r$ = .47.
+Higgins' RFQ correlated with BAS, $r$ = -0.09. 
+
+
+# Result  
+## Meta analysis  
+```{r}
+library("metafor")
+```
+
+
+```{r regression_meta}
+# regressing RFQ (promotion and prevention) on y 
+regression_meta <- function(df, y) {
+  lmfit <- df %>% 
+    filter(exclusion == "eligible") %>% # excluding ineligible participants
+    centre_pred(var = c("promotion", "prevention")) %>% # centring predictors
+    lm(eval(rlang::sym(y)) ~ promotion.c + prevention.c, # fit regression
+       data = .)
+  list(r2 = broom::glance(lmfit)$r.squared, # regression model R2
+       promotion_t = broom::tidy(lmfit)$statistic[2], # t-value 
+       prevention_t = broom::tidy(lmfit)$statistic[3],
+       promotion_b = broom::tidy(lmfit)$estimate[2], # estimate
+       prevention_b = broom::tidy(lmfit)$estimate[3],
+       promotion_se = broom::tidy(lmfit)$std.error[2], # std. error
+       prevention_se = broom::tidy(lmfit)$std.error[3],
+       promotion_p = broom::tidy(lmfit)$p.value[2], # p-value
+       prevention_p = broom::tidy(lmfit)$p.value[3]) 
+}
+```
+
+### Online dating experience
+#### Engagement  
+
+
+
+
+```{r engage_meta}
+# predictor: `engagement` with the same items across studies  
+engage_meta <- list(s2a, s2b, s3, s4) %>% 
+   map_dfr(regression_meta, y = "engage", .id = "study_id") %>% 
+   mutate(ni = n_1to4[-1])
+```
+```{r}
+engage_prom_spcor = metafor::escalc(data = engage_meta,
+                measure = "SPCOR", # semi-partial correlation
+                ti = promotion_t, # t-value of promotion.c
+                r2i = r2,
+                ni =  ni,
+                mi = rep(3, 4),
+                digits = 2)
+```
+
+```{r}
+engage_prev_spcor = metafor::escalc(data = engage_meta,
+                measure = "SPCOR", # semi-partial correlation
+                ti = prevention_t, # t-value of promotion.c
+                r2i = r2,
+                ni =  ni,
+                mi = rep(3, 4),
+                digits = 2)
+```
+
+
+##### Promotion
+
+```{r engage_promotion, cache=TRUE}
+(engage_promotion <- list("FE", "REML") %>% 
+  map(~rma(data = engage_meta,
+          method = ., # restricted maximum-likelihood estimator
+          measure = "SPCOR", # semi-partial correlation
+          ti = promotion_t, # t-value of promotion.c
+          r2i = r2,
+          ni =  ni,
+          mi = rep(3, 4), # number of predictors
+          slab = paste0(study_id, " [N = ", ni, "]"))))
+
+# engage_promotion <- engage_meta %>%
+#    rma(method = "REML", # restricted maximum-likelihood estimator
+#        measure = "SPCOR", # semi-partial correlation
+#        ti = .$promotion_t, # t-value of promotion.c
+#        r2i = .$r2,
+#        ni =  .$ni,
+#        mi = rep(3, 4), # number of predictors
+#        data = .,
+#        slab = paste0(study_id, " [N = ", ni, "]"))
+```
+
+
+```{r}
+metafor::forest.rma(engage_promotion[[1]], # fixed effect
+                    annotate = TRUE, addcred = TRUE)
+```
+
+##### Prevention
+```{r engage_prevention, cache = TRUE}
+
+(engage_prevention <- list("FE", "REML") %>% 
+  map(~rma(data = engage_meta,
+          method = ., # restricted maximum-likelihood estimator
+          measure = "SPCOR", # semi-partial correlation
+          ti = prevention_t, # t-value of promotion.c
+          r2i = r2,
+          ni =  ni,
+          mi = rep(3, 4), # number of predictors
+          slab = paste0(study_id, " [N = ", ni, "]"))))
+
+# engage_prevention <- engage_meta %>% 
+#   rma(method = "REML", 
+#       measure = "SPCOR", 
+#       ti = .$prevention_t, # t-value of prevention.c
+#       r2i = .$r2,
+#       ni =  .$ni,
+#       mi = rep(3, 4),
+#       data = .,
+#       slab = paste0(study_id, " [N = ", ni, "]"))
+```
+
+```{r}
+metafor::forest.rma(engage_prevention[[1]], # fixed effect
+                    annotate = TRUE, addcred = TRUE)
+```
+
+
+#### Ease     
+```{r ease_meta}
+(ease_meta <- list(s2a, s2b, s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map_dfr(regression_meta, y = "ease", .id = "study_id") %>% 
+   mutate(ni = n_1to4[-1]))
+```
+```{r}
+ease_prev_spcor = metafor::escalc(data = ease_meta,
+                 measure = "SPCOR", # semi-partial correlation
+                 ti = prevention_t, # t-value of promotion.c
+                 r2i = r2,
+                 ni =  ni,
+                 mi = rep(3, 4),
+                 digits = 2)
+```
+
+```{r}
+ease_prom_spcor = metafor::escalc(data = ease_meta,
+                 measure = "SPCOR", # semi-partial correlation
+                 ti = promotion_t, # t-value of promotion.c
+                 r2i = r2,
+                 ni =  ni,
+                 mi = rep(3, 4),
+                 digits = 2)
+```
+
+
+##### Prevention
+
+```{r ease_prevention, cache = TRUE}
+(ease_prevention <- list("FE", "REML") %>% 
+  map(~rma(data = ease_meta,
+          method = ., # restricted maximum-likelihood estimator
+          measure = "SPCOR", # semi-partial correlation
+          ti = prevention_t, # t-value of promotion.c
+          r2i = r2,
+          ni =  ni,
+          mi = rep(3, 4), # number of predictors
+          slab = paste0(study_id, " [N = ", ni, "]"))))
+```
+
+
+
+```{r}
+metafor::forest.rma(ease_prevention[[2]], # REML model
+                    annotate = TRUE, addcred = TRUE)
+```
+
+##### Promotion
+```{r ease_promotion, cache = TRUE}
+(ease_promotion <- list("FE", "REML") %>% 
+  map(~rma(data = ease_meta,
+           method = ., 
+           measure = "SPCOR", 
+           ti = promotion_t, # t-value of promotion.c
+           r2i = r2,
+           ni =  ni,
+           mi = rep(3, 4),
+           slab = paste0(study_id, " [N = ", ni, "]"))))
+```
+
+```{r}
+metafor::forest.rma(ease_promotion[[2]], annotate = TRUE, addcred = TRUE)
+```
+
+
+### Online dating success  
+
+
+```{r success_meta}
+success_meta <- list(s1, s3, s4) %>% 
+  map_dfr(regression_meta, y = "ods", .id = "study_id") %>% 
+   mutate(ni = c(220, 480, 150),
+          study_id = c("s1", "s3", "s4"))
+```
+
+
+```{r}
+success_spcor = metafor::escalc(data = success_meta,
+                  measure = "SPCOR", # semi-partial correlation
+                  ti = promotion_t, # t-value of promotion.c
+                  r2i = r2,
+                  ni =  ni,
+                  mi = rep(3, 3),
+                  digits = 2)
+
+success_prev_spcor = metafor::escalc(data = success_meta,
+                  measure = "SPCOR", # semi-partial correlation
+                  ti = prevention_t, # t-value of promotion.c
+                  r2i = r2,
+                  ni =  ni,
+                  mi = rep(3, 3),
+                  digits = 2)
+
+```
+
+
+```{r ods_effect_size}
+(success_meta %>% 
+  pivot_longer(.,
+    cols = promotion_t:prevention_p,
+               names_to = c("rfq", ".value"),
+               names_pattern = "(.*)_(.*)"))
+```
+
+
+#### Promotion
+```{r success_promotion, cache = TRUE}
+# (success_promotion <- 
+(success_promotion <- list("FE", "REML") %>%    
+  map(~rma(data = success_meta,
+           method = .,
+           measure = "SPCOR", 
+           ti = promotion_t, # t-value of promotion.c
+           r2i = r2,
+           ni =  ni,
+           mi = rep(3, 3),
+           slab = paste0(study_id, " [N = ", ni, "]"))))
+```
+
+
+```{r}
+metafor::forest.rma(success_promotion[[1]], # fixed effect
+                    annotate = TRUE, addcred = TRUE)
+```
+
+#### Prevention
+```{r success_prevention, cache = TRUE}
+
+(success_prevention <- list("FE", "REML") %>%    
+  map(~rma(data = success_meta,
+           method = .,
+           measure = "SPCOR", 
+           ti = prevention_t, # t-value of promotion.c
+           r2i = r2,
+           ni =  ni,
+           mi = rep(3, 3),
+           slab = paste0(study_id, " [N = ", ni, "]"))))
+
+
+# (success_prevention <- success_meta %>% 
+#   rma(method = "REML", 
+#       measure = "SPCOR", 
+#       ti = .$prevention_t, # t-value of prevention.c
+#       r2i = .$r2,
+#       ni =  .$ni,
+#       mi = rep(3, 3),
+#       data = .,
+#       slab = paste0(study_id, " [N = ", ni, "]")))
+```
+
+
+
+```{r}
+metafor::forest.rma(success_prevention[[1]], # fixed effect
+                    annotate = TRUE, addcred = TRUE)
+```
+
+## Social motive regression
+### Online Dating Experience
+```{r}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas", 
+                      "rfq_prom", "rfq_prev")) %>% 
+  lm(cbind(engage, ease) ~ promotion.c + prevention.c + bis.c + bas.c,
+     data = .) %>% 
+  broom::tidy() %>% 
+  mutate_at("p.value", round, 3)
+  # car::Anova(3) %>% 
+  # summary
+```
+
+
+#### Engagement
+```{r engage_regression}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas", 
+                      "rfq_prom", "rfq_prev")) %>% 
+  lm(engage ~ promotion.c + prevention.c + bis.c + bas.c,
+     data = .) %>% 
+  # glance()
+  tidy() %>% 
+  mutate_at("p.value", round, 3)
+```
+
+```{r egnage_bisbas}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("bis", "bas")) %>% 
+  lm(engage ~ bis.c + bas.c, 
+     data = .) %>% 
+  tidy() %>% 
+  mutate_at("p.value", round, 3)
+```
+
+```{r engage_higgins}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("rfq_prom", "rfq_prev")) %>% 
+  lm(engage ~ rfq_prom.c + rfq_prev.c, 
+     data = .) %>% 
+  tidy() %>% 
+  mutate_at("p.value", round, 3)
+```
+
+#### Ease
+```{r ease_regression}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas", 
+                      "rfq_prom", "rfq_prev")) %>% 
+  lm(ease ~ promotion.c + prevention.c + bis.c + bas.c + rfq_prom.c + rfq_prev.c,
+     data = .) %>% 
+  tidy() %>% 
+  mutate_at("p.value", round, 3)
+```
+
+```{r ease_general}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention")) %>% 
+  lm(ease ~ promotion.c + prevention.c,
+     data = .) %>% 
+  tidy() %>% 
+  mutate_at("p.value", round, 3)
+```
+
+```{r ease_higgins}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("rfq_prom", "rfq_prev")) %>% 
+  lm(ease ~ rfq_prom.c + rfq_prev.c, 
+     data = .) %>% 
+  tidy() %>% 
+  mutate_at("p.value", round, 3)
+```
+
+```{r ease_bisbas}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("bis", "bas")) %>% 
+  lm(ease ~ bis.c + bas.c, 
+     data = .) %>% 
+  tidy() %>% 
+  mutate_at("p.value", round, 3)
+```
+
+### Success
+
+```{r ods_regression}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas")) %>% 
+  lm(ods ~ promotion.c + prevention.c + bis.c + bas.c ,
+     data = .) %>% 
+  # sjPlot::tab_model(show.stat = TRUE, show.std = "std", string.stat = "\bt",
+  #                   dv.labels = "Online Dating Success")
+  # glance()
+  tidy() %>% 
+  mutate_at("p.value", round, 3)
+```
+
+```{r ods_rfq}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention")) %>% 
+  lm(ods ~ promotion.c + prevention.c , 
+     data = .) %>% 
+  # broom::glance()
+  broom::tidy() %>%
+  mutate_at("p.value", round, 3)
+  car::Anova(type = 3) %>% 
+  effectsize::effectsize()
+```
+
+
+```{r ods_bisbas}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("bis", "bas")) %>% 
+  lm(ods ~ bis.c + bas.c, 
+     data = .) %>% 
+  broom::tidy() %>% 
+  mutate_at("p.value", round, 3)
+  broom::glance()
+```
+
+
+```{r ods_higgins}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  lm(ods ~ rfq_prom + rfq_prev, 
+     data = .) %>% 
+  summary()
+```
+
+```{r success-regression-table}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas")) %>% 
+  lm(ods ~ promotion.c + prevention.c + bis.c + bas.c ,
+     data = .) %>% 
+  sjPlot::tab_model(show.stat = TRUE, show.se = TRUE, show.std = "std", string.stat = "\bt",
+                    dv.labels = "Online Dating Success", file = "success_reg_table.html")
+```
+
+
+## Mediation analysis  
+
+### Strategy-specific success
+```{r}
+library("OpenMx");library("metaSEM")
+```
+
+#### Promotion 
+```{r promotion_mediation, cache = TRUE, eval=error_fixed}
+# strategy-specific success & RFQ mediated through engage & ease
+promotion_mediation <- list(s2a, s2b, s3) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, promotion, engage, ease, success_strategy) %>% 
+  map(cor, use = "pairwise.complete.obs") %>% 
+  tssem1(.,
+         n = c(200, 300, 480),
+         method = "REM")
+```
+
+```{r eval=error_fixed}
+summary(promotion_mediation)
+```
+
+```{r eval=error_fixed}
+coef(promotion_mediation)
+```
+
+
+
+```{r eval=error_fixed}
+A_prom <- matrix(c(0, 0, 0, 0,
+                   "0.2*prom_engage", 0            , 0            , 0,
+                   "0.2*prom_ease", 0, 0            , 0,
+                   "0.2*prom_success", "0.2*engage_success", "0.2*ease_success", 0),
+                 ncol = 4, nrow=4, byrow=TRUE)
+dimnames(A_prom)[[1]] <- dimnames(A_prom)[[2]] <- c("prom", "engage", "ease", "success")
+A_prom <- as.mxMatrix(A_prom)
+```
+
+```{r eval=error_fixed}
+# S_prom <- Diag(c(1, "0.1*eEngage", "0.1*eEase", "0.1*eSuccess"))
+S_prom <- matrix(c("0.1*eProm", 0, 0, 0,
+                   0, "0.1*eEngage", "0.1*eEngageEase", 0,
+                   0, "0.1*eEngageEase", "0.1*eEase", 0,
+                   0, 0, 0, "0.1*eSuccess"),
+                 ncol = 4, byrow = T)
+dimnames(S_prom)[[1]] <- dimnames(S_prom)[[2]] <- c("prom", "engage", "ease", "success")
+S_prom <- as.mxMatrix(S_prom)
+```
+
+```{r eval=error_fixed}
+prom_mediation_model <- tssem2(promotion_mediation,
+       Amatrix = A_prom,
+       Smatrix = S_prom,
+       intervals.type = "LB",
+       diag.constraints = TRUE,
+       mx.algebras = list(totalEffect = mxAlgebra(prom_engage*engage_success +
+                                                       prom_ease*ease_success +
+                                                       prom_success,
+                                                     name = "totalEffect"), 
+                          totalIndirect = mxAlgebra(prom_engage*engage_success + 
+                                                      prom_ease*ease_success,
+                                                    name = "totalIndirect"),
+                          indirect_engage = mxAlgebra(prom_engage*engage_success,
+                                                      name = "indirect_engage"),
+                          indirect_ease = mxAlgebra(prom_ease*ease_success,
+                                                    name = "indirect_ease")))
+```
+
+```{r eval=error_fixed}
+summary(prom_mediation_model)
+# prom_mediation_model <- rerun(prom_mediation_model)
+```
+
+
+```{r prom_mediation_plot, eval=error_fixed}
+
+meta2semPlot(prom_mediation_model) %>% 
+  semPlot::semPaths(whatLabels = "std",
+                    layout = matrix(c(-4, 0, # mediator
+                                      0, 0.5, # X
+                                      0, -0.5,
+                                      4, 0),
+                                    ncol = 2,
+                                    byrow = T),
+                    # rotation = 2,
+                    sizeMan = 10,
+                    sizeLat = 12,
+                    curvePivot = TRUE,
+                    nodeLabels = c("Promotion\nFocus", "Engagement", "Ease", "Strategy\nSuccess"))
+```
+
+#### Prevention
+
+```{r eval=error_fixed}
+A_prev <- matrix(c(0, 0, 0,
+                   "0.2*prev_ease", 0, 0,
+                   "0.2*prev_success", "0.2*ease_success", 0),
+                 ncol = 3, nrow = 3, byrow = TRUE)
+
+dimnames(A_prev)[[1]] <- dimnames(A_prev)[[2]] <- c("prev", "ease", "success")
+A_prev <- as.mxMatrix(A_prev)
+```
+
+```{r eval=error_fixed}
+S_prev <- Diag(c(1, "0.1*eEase", "0.1*eSuccess"))
+dimnames(S_prev)[[1]] <- dimnames(S_prev)[[2]] <- c("prev", "ease", "success")
+S_prev <- as.mxMatrix(S_prev)
+```
+
+
+```{r prevention_mediation, cache = TRUE, eval=error_fixed}
+prevention_mediation <- list(s2a, s2b, s3) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, prevention, ease, fit_success) %>% 
+  map(cor, use = "pairwise.complete.obs") %>% 
+  tssem1(.,
+         n = c(200, 300, 480),
+         method = "REM") %>% 
+  tssem2(.,
+         Amatrix = A_prev,
+         Smatrix = S_prev,
+         intervals.type = "LB",
+         diag.constraints = TRUE,
+         mx.algebras = list(indirectEffect = mxAlgebra(prev_ease*ease_success,
+                                                       name = "indirectEffect"),
+                            totalEffect = mxAlgebra(prev_ease*ease_success + 
+                                                      prev_success,
+                                                    name = "totalEffect")))
+```
+
+
+```{r eval=error_fixed}
+summary(prevention_mediation)
+```
+
+```{r eval=error_fixed}
+meta2semPlot(prevention_mediation) %>% 
+  semPlot::semPaths(whatLabels = "est",
+                    layout = matrix(c(-4, 0, # mediator
+                                      0, 0.5, # X
+                                      4, 0),
+                                    ncol = 2,
+                                    byrow = T),
+                    sizeMan = 10,
+                    nodeLabels = c("Prevention\nFocus", "Ease", "Online Dating\nSuccess"))
+```
+
+
+### General success
+#### Promotion focus
+```{r eval=error_fixed}
+prom_ods_A <- matrix(c(0, 0, 0, 0,
+                       "0.2*prom_engage", 0            , 0            , 0,
+                       "0.2*prom_ease", 0, 0            , 0,
+                       "0.2*prom_success", "0.2*engage_success", "0.2*ease_success", 0),
+                     ncol = 4, nrow=4, byrow=TRUE)
+dimnames(prom_ods_A)[[1]] <- dimnames(prom_ods_A)[[2]] <- c("prom", "engage", "ease", "success")
+prom_ods_A  <- as.mxMatrix(prom_ods_A)
+```
+
+
+```{r eval=error_fixed}
+prom_ods_S <- matrix(c(1, 0, 0, 0,
+                       0, "0.1*eEngage", "0.1*eEngageEase", 0,
+                       0, "0.1*eEngageEase", "0.1*eEase", 0,
+                       0, 0, 0, "0.1*eSuccess"),
+                     ncol = 4, byrow = T)
+
+dimnames(prom_ods_S)[[1]] <- dimnames(prom_ods_S)[[2]] <- c("prom", "engage", "ease", "success")
+prom_ods_S <- as.mxMatrix(prom_ods_S)
+```
+
+```{r promotion_ods_mediation, cache = TRUE, eval=error_fixed}
+# strategy-specific success & RFQ mediated through engage & ease
+promotion_ods_mediation <- list(s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, promotion, engage, ease, ods) %>% 
+  map(cor, use = "pairwise.complete.obs") %>% 
+  tssem1(.,
+         n = c(480, 150),
+         method = "REM") %>% 
+  tssem2(.,
+         Amatrix = prom_ods_A,
+         Smatrix = prom_ods_S,
+         intervals.type = "LB",
+         diag.constraints = TRUE,
+         mx.algebras = list(totalEffect = mxAlgebra(prom_engage*engage_success +
+                                                      prom_ease*ease_success +
+                                                      prom_success,
+                                                    name = "totalEffect"), 
+                            totalIndirect = mxAlgebra(prom_engage*engage_success + 
+                                                        prom_ease*ease_success,
+                                                      name = "totalIndirect"),
+                            indirect_engage = mxAlgebra(prom_engage*engage_success,
+                                                        name = "indirect_engage"),
+                            indirect_ease = mxAlgebra(prom_ease*ease_success,
+                                                      name = "indirect_ease")))
+```
+
+```{r eval=error_fixed}
+summary(promotion_ods_mediation)
+```
+
+```{r prom_ods_mediation_plot, eval=error_fixed}
+meta2semPlot(promotion_ods_mediation) %>% 
+  semPlot::semPaths(whatLabels = "std",
+                    layout = matrix(c(-4, 0, # mediator
+                                      0, 0.5, # X
+                                      0, -0.5,
+                                      4, 0),
+                                    ncol = 2,
+                                    byrow = T),
+                    # rotation = 2,
+                    sizeMan = 10,
+                    sizeLat = 12,
+                    curvePivot = TRUE,
+                    nodeLabels = c("Promotion\nFocus", "Engagement", "Ease", "Strategy\nSuccess"))
+```
+
+
+
+
+#### Prevention 
+```{r eval=error_fixed}
+prev_ods_A <- matrix(c(0, 0, 0,
+                   "0.2*prev_ease", 0, 0,
+                   "0.2*prev_success", "0.2*ease_success", 0),
+                 ncol = 3, nrow = 3, byrow = TRUE)
+
+dimnames(prev_ods_A)[[1]] <- dimnames(prev_ods_A)[[2]] <- c("prev", "ease", "success")
+prev_ods_A <- as.mxMatrix(prev_ods_A)
+```
+
+```{r eval=error_fixed}
+prev_ods_S <- Diag(c(1, "0.1*eEase", "0.1*eSuccess"))
+dimnames(prev_ods_S)[[1]] <- dimnames(prev_ods_S)[[2]] <- c("prev", "ease", "success")
+prev_ods_S <- as.mxMatrix(prev_ods_S)
+```
+
+
+```{r prevention_ods_mediation, cache = TRUE, eval=error_fixed}
+prevention_ods_mediation <- list(s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, prevention, ease, ods) %>% 
+  map(cor, use = "pairwise.complete.obs") %>% 
+  tssem1(.,
+         n = c(480, 150),
+         method = "REM") %>% 
+  tssem2(.,
+         Amatrix = prev_ods_A,
+         Smatrix = prev_ods_S,
+         intervals.type = "LB",
+         diag.constraints = TRUE,
+         mx.algebras = list(indirectEffect = mxAlgebra(prev_ease*ease_success,
+                                                       name = "indirectEffect"),
+                            totalEffect = mxAlgebra(prev_ease*ease_success + 
+                                                      prev_success,
+                                                    name = "totalEffect")))
+```
+
+```{r eval=error_fixed}
+summary(prevention_ods_mediation)
+```
+
+
+```{r prevention_ods_model}
+prevention_ods_model <- '
+  # regressions
+  ods ~ b1*ease + c1*prevention
+
+  ease ~ a1*prevention
+
+  # indirect paths
+  ease_indirect := a1 * b1
+  
+  # total
+  total := c1 + (a1 * b1)
+'
+```
+
+
+```{r prev_sem_parameter}
+list(s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(~mutate_at(., vars(c("ease", "prevention")), mean_x)) %>% 
+  map(~sem(prevention_ods_model, 
+           data = .x)) %>% 
+  #map(summary, fit.measures = TRUE, standardized = TRUE) %>% 
+  map_dfr(tidy, .id = "study") %>% 
+  # select(study, term, label, std.all, std.error, conf.low, conf.high, statistic, p.value) %>% 
+  # filter(label == "ease_indirect") %>% 
+  filter(label %in% c("a1", "a2", "b1", "b2", "c1", "engage_indirect", "ease_indirect", "total_indirect", "total")) %>%
+  mutate_if(is.numeric, round, 2) %>% 
+  dplyr::select(study, label, std.all, std.error, statistic, p.value) 
+```
+
+```{r}
+s3 %>% 
+  filter(exclusion == "eligible") %>% 
+  mutate_at(vars(c("ease", "prevention")), mean_x) %>% 
+  sem(prevention_ods_model, data = .) %>% 
+  summary(fit.measures = TRUE, standardized = TRUE)
+```
+
+
+### Confirmatory Mediation Analysis (S4)
+```{r mediation_packages}
+library("mediation")
+source("/Users/suesong/R/r-scripts/mediations_patch.r")
+```
+
+#### Promotion
+```{r eval=FALSE}
+# error not fixed
+prom_mediation <- function(df) {
+  prom_data = df %>% 
+    centre_pred(var = c("promotion", "engage", "ease")) %>% 
+    dplyr::select(promotion.c, engage.c, ease.c, ods) %>% 
+    list(dataset = .)
+  
+  mediation.result <- mediations(prom_data,
+                                 "promotion.c", # X
+                                 c("engage.c", "ease.c"), # mediators
+                                 "ods", # Y
+                                 boot = TRUE,
+                                 sims = 5000)
+  mediation.summary <- augment_summary(mediation.result)
+  med.res <- list(mediation.summary, standard_errors(mediation.result))
+  
+  return(med.res)
+}
+
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  prom_mediation
+```
+
+
+```{r}
+# engagement only without ease as a mediator
+prom_mediation <- function(df) {
+  a_path <- df %>%
+    lm(engage ~ promotion,
+       data = .)
+  
+  b_path <- df %>%
+    lm(ods ~ promotion + engage,
+       data = .)
+  
+  mediation.result <- mediate(a_path,
+                              b_path,
+                              treat = "promotion",
+                              mediator = "engage",
+                              boot = TRUE,
+                              sims = 5000)
+  mediation.summary <- summary(mediation.result)
+  med.res <- list(mediation.summary, standard_errors(mediation.result))
+  
+  return(med.res)
+}
+
+list(s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(mutate_at, "engage", mean_x) %>% 
+  map(prom_mediation)
+```
+
+
+
+
+```{r promotion_ods_model}
+promotion_ods_model <- '
+  # regressions
+  ods ~ b1*engage + b2*ease + c1*promotion
+
+  engage ~ a1*promotion 
+  ease ~ a2*promotion
+  
+  engage ~~ ease
+
+  # indirect paths
+  engage_indirect := a1 * b1
+  ease_indirect := a2 * b2
+  
+  total_indirect := (a1 * b1) + (a2 * b2)
+  
+  # total
+  total := c1 + (a1 * b1) + (a2 * b2)
+'
+```
+
+```{r prom_sem_parameters}
+list(s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(~mutate_at(., vars(c("engage", "ease", "promotion")), mean_x)) %>% 
+  map(~sem(promotion_ods_model, 
+           data = .x)) %>% 
+  # map(summary, fit.measures = TRUE, standardized = TRUE) %>% 
+  map_dfr(tidy, .id = "study") %>% 
+  # select(study, term, label, std.all, std.error, conf.low, conf.high, statistic, p.value) %>% 
+  filter(label %in% c("engage_indirect", "ease_indirect", "total_indirect", "total", "c1")) %>% 
+  mutate_if(is.numeric, round, 2) %>% 
+  dplyr::select(study, term, label, std.all, std.error, p.value)
+```
+
+```{r}
+s3 %>% 
+  filter(exclusion == "eligible") %>% 
+  mutate_at(vars(c("engage", "ease", "promotion")), mean_x) %>% 
+  sem(promotion_ods_model, data = .) %>% 
+  summary(fit.measures = TRUE, standardized = TRUE)
+```
+
+
+
+#### Prevention
+```{r prev_mediation}
+prev_mediation <- function(df) {
+  a_path <- df %>%
+    lm(ease ~ prevention,
+       data = .)
+  
+  b_path <- df %>%
+    lm(ods ~ prevention + ease,
+       data = .)
+  
+  mediation.result <- mediate(a_path,
+                              b_path,
+                              treat = "prevention",
+                              mediator = "ease",
+                              boot = TRUE,
+                              sims = 5000)
+  mediation.summary <- summary(mediation.result)
+  med.res <- list(mediation.summary, standard_errors(mediation.result))
+  
+  return(med.res)
+}
+
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  mutate_at(vars(c("ease", "prevention")), mean_x) %>% 
+  prev_mediation
+```
+
+```{r}
+s3 %>% 
+  filter(exclusion == "eligible") %>% 
+  mutate_at(vars(c("ease", "prevention")), mean_x) %>% 
+  prev_mediation
+```
+
+## Exploratory Analyses
+
+```{r}
+list(s3, s4) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(~lm(ods ~ prevention + promotion + ease + engage,
+          data = .)) %>% 
+  map_dfr(broom::tidy, .id = "Study") %>% 
+  mutate_at("p.value", round, 3) %>% 
+  filter(term != "(Intercept)") %>% 
+  arrange(term, Study)
+```
+
+When entered simultaneously, engagement in profile-browsing predicts subjective success and washes out the effects of promotion and prevention focus. 
+
