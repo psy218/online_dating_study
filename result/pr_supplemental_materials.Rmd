@@ -1,0 +1,171 @@
+---
+title: "supplemental materials"
+output:
+  word_document:
+    reference_docx: apa-styles.docx
+    df_print: kable
+  bookdown::html_document2: 
+    code_folding: hide
+    theme: cosmo
+    highlight: tango
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+    df_print: paged
+    fig_width: 8
+    fig_height: 5
+---
+
+### Online dating success 
+We conducted exploratory factor analysis (EFA) and confirmatory factor analysis (CFA) for online dating success measures in Studies 1 and 4. 
+```{r ods_efa, include = render_html}
+ods_efa = s1 %>% 
+  filter(exclusion == "eligible") %>% 
+  dplyr::select(starts_with("suc_")) %>% 
+  psych::fa(nfactor = 1, max.iter = 100, fm = "ml")
+
+ods_efa %>% 
+  .$loadings
+```
+
+Based on the EFA, which revealed a one-factor solution (eigenvalue = `r ods_efa$values[1]`) explaining `r ods_efa$Vaccounted[[2]]*100`% of the variance, we conducted a CFA. 
+```{r include = render_html}
+library("lavaan")
+ods_model <- 'online_dating_success =~ suc_1 +  suc_2 +  suc_3 +  suc_4 +  suc_5 +  suc_6 +  suc_7 +  suc_8 +  suc_9 +  suc_10 '
+
+ods_cfa <- s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  cfa(ods_model, data = ., std.lv = TRUE)
+
+summary(ods_cfa, standardized = T, fit.measures=TRUE)
+```
+```{r}
+ods_codebook = tibble::tribble(
+  ~var_name,                                                                                 ~items,
+    "suc_1",                  "Online dating is effective at helping me achieve my romantic goals.",
+    "suc_2",                                     "I am satisfied with my online dating experience.",
+    "suc_3",        "Online dating is not really helping me connect with possible dating partners.",
+    "suc_4",                              "I have already had a lot of success with online dating.",
+    "suc_5", "I feel like online dating is helping me to get in touch with people whom I can date.",
+    "suc_6",             "I feel I am able to achieve my relationship goals through online dating.",
+    "suc_7",                    "I do not feel like online dating has been very successful for me.",
+    "suc_8",       "I feel like I have connected with a lot of great people through online dating.",
+    "suc_9",                                         "I feel like online dating works well for me.",
+   "suc_10",        "I feel like I have not made any meaningful connections through online dating."
+  )
+
+```
+
+The analysis revealed an adequate model fit, SRMR = `r broom::glance(ods_cfa)$srmr`, CFI = `r broom::glance(ods_cfa)$cfi`, RMSEA = `r broom::glance(ods_cfa)$rmsea`, 90% CI [0.11, `r broom::glance(ods_cfa)$rmsea.conf.high`], and AIC = `r broom::glance(ods_cfa)$AIC`; see Table \@ref(tab:ods-ecfa) outlines the factor loadings.
+
+```{r ods-ecfa}
+tibble(ods_efa$loadings) %>%
+  set_names("study1") %>% 
+  mutate(term = paste0("suc_", row_number()), .before = study1) %>% 
+  inner_join(broom::tidy(ods_cfa) %>% 
+               select(term, study4 = std.all) %>% 
+               mutate_at("term", ~str_remove_all(., "online_dating_success =~ ")),
+             by = "term") %>% 
+  inner_join(ods_codebook, by = c("term" = "var_name")) %>% 
+  select(term, items, everything()) %>% 
+  knitr::kable(caption = "Factor Loadings for EFA and CFA of Online Dating Success Measure in Studies 1 and 4") 
+```
+
+### Profile browsing experience
+
+In Study 2, exploratory factor analysis (EFA) was conducted to examine the factor structure of profile-browsing experience outcome. We used the oblique rotation method as we predicted the experience in browsing dating profiles to be related. 
+```{r}
+pb_efa = s2 %>% 
+  filter(exclusion == "eligible") %>% 
+  dplyr::select(starts_with("overall_engagement_"), starts_with( "overall_ease_")) %>% 
+  drop_na %>% 
+  psych::fa(nfactor = 2,
+            rotate = "oblimin",
+            max.iter = 100,
+            fm = "ml")
+```
+The two-factor solutions  extracted using the maximum-likelihood extraction with oblimin rotation accounted for 53% of the variance. 
+```{r}
+
+pb_codebook = tibble::tribble(
+  ~items,                                                                                   ~item_questions,
+  "overall_engagement_1",                                         "I enjoyed browsing the online dating profiles.",
+  "overall_engagement_2",                                       "It was fun to browse the online dating profiles.",
+  "overall_engagement_3",                                                    "Browsing the profiles was exciting.",
+  "overall_engagement_4",                                        "My mind wandered while I was browsing profiles.",
+  "overall_engagement_5", "I was in the zone (i.e., I felt immersed) while I was browsing online dating profiles.",
+  "overall_ease_1",                                                   "It was easy to browse the profiles.a",
+  "overall_ease_2",                                               "It was effortful to browse the profiles.",
+  "overall_ease_3",                                             "I found it awkward to browse the profiles.",
+  "overall_ease_4",                                    "I felt comfortable browsing online dating profiles.",
+  "overall_ease_5",                                           "I found it difficult to browse the profiles."
+)
+```
+
+Out of 10 items listed in Table \@ref(tab:pb-efa), a total of 6 items that had high inter-item correlations (i.e., r > .33) and factor loadings (i.e., factor loadings above .40) were retained in the final solution. 
+
+```{r pb-efa}
+tibble(items = names(pb_efa$complexity),
+       Engagement = pb_efa$loadings[,1],
+       Ease = pb_efa$loadings[,2]) %>% 
+  mutate_if(is.double, round, 2) %>% 
+  inner_join(pb_codebook, by = "items") %>% 
+  select(items = item_questions, Engagement, Ease) %>% 
+  knitr::kable(caption = "Factor Loadings for Exploratory Factor Analysis with Oblimin Rotation of Engagement and Ease Items in Study 2")
+```
+*Note*. N = 200. Exploratory factor analysis (EFA) results obtained using maximum likelihood estimation with oblimin rotation; interfactor correlation = `r round(pb_efa$score.cor[[2]], 2)`. Factor loadings ≥ .40 are in boldface. Asterisks (*) indicate items included in the final solution. 
+Although Item 6 crossed-loaded onto both engagement and ease, we retained this item for the ease factor due to its face validity. 
+
+
+We retained Item 6 in Table 2 instead of Item 7 for a theoretical reason: Although Item 6 was loaded onto the engagement and ease factors, it was retained on the ease factor because it explicitly referred to ease. With these final six items in Study 3, we conducted the EFA, which revealed a two-factor solution with their respective engagement and ease items, and the confirmatory factor analysis (CFA), which revealed engagement and ease items’ high loadings to their respective factors; see Table \@ref(tab:pb-ecfa).
+```{r}
+pb_efa_s3 = s3 %>% 
+  filter(exclusion == "eligible") %>% 
+  select(engage_1:engage_3,ease_1:ease_2, ease_4) %>% 
+  drop_na %>% 
+  psych::fa(nfactor = 2,
+            rotate = "oblimin",
+            max.iter = 100, 
+            fm = "ml") 
+```
+
+
+```{r pb_cfa}
+pb_model <- '
+# measurement model
+fit_engage =~ engage_1 + engage_2 + engage_3
+fit_ease =~ ease_1 + ease_2 + ease_4
+
+# factor covariance
+fit_engage ~~ fit_ease 
+'
+
+pb_cfa <- s3 %>% 
+  filter(exclusion == "eligible") %>% 
+  cfa(pb_model, data = ., std.lv = TRUE)
+```
+
+```{r}
+# interfactor correlation between engagement and ease
+pb_cfa_ic = broom::tidy(pb_cfa) %>% 
+  filter(op == "~~" & term == "fit_engage ~~ fit_ease") %>% 
+  pull(std.all)
+```
+
+```{r pb-ecfa}
+tibble(term = names(pb_efa_s3$complexity),
+       Engagement = pb_efa_s3$loadings[,1],
+       Ease = pb_efa_s3$loadings[,2]) %>% 
+  mutate_if(is.double, round, 2) %>% 
+  inner_join(broom::tidy(pb_cfa) %>% 
+               filter(op == "=~") %>% 
+               select(term, cfa = std.all) %>% 
+               mutate_at("term", ~str_remove_all(., "fit_(engage|ease) =~ ")),
+             by = "term") %>% 
+  knitr::kable(caption = "Factor Loadings for EFA and CFA of Online Dating Success Measure in Studies 1 and 4") 
+```
+Note. N = 300. Exploratory factor analysis (EFA) results obtained using maximum likelihood estimation with oblimin rotation; interfactor correlation = `r round(pb_efa_s3$score.cor[[2]], 2)`. Confirmatory factor analysis (CFA) results obtained using maximum likelihood estimation; interfactor correlation = `r round(pb_cfa_ic, 2)`. The factor loadings for the CFA are standardized, and 0 indicate fixed parameters. Factor loadings ≥ .40 are in boldface.
+
+
+

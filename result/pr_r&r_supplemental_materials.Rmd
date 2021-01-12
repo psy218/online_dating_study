@@ -1,0 +1,449 @@
+---
+title: "R & R Supplemental Materials"
+output:
+  html_document:
+    toc: yes
+    df_print: paged
+  bookdown::html_document2:
+    code_folding: hide
+    theme: cosmo
+    highlight: tango
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+    df_print: paged
+    fig_width: 8
+    fig_height: 5
+  word_document:
+    reference_docx: apa-styles.docx
+    df_print: kable
+---
+
+### Exclusion criteria as a moderator   
+```{r}
+(engage_meta_ineligible <- list(s2, s3, s4, s5) %>% 
+   map_dfr(regression_meta, y = "engage", .id = "Study") %>% 
+   mutate(ni = n_1to5[-1],
+          Study = 2:5))
+```
+```{r}
+(ease_meta_ineligible <- list(s2, s3, s4, s5) %>% 
+   map_dfr(regression_meta, y = "ease", .id = "Study") %>% 
+   mutate(ni = n_1to5[-1],
+          Study = 2:5))
+```
+
+```{r}
+(success_meta_ineligible <-  list(s1, s4, s5) %>% 
+  map_dfr(regression_meta, y = "ods", .id = "Study") %>% 
+   mutate(ni = n_1to5[c(1, 4, 5)],
+          Study = c(1, 4, 5)))
+```
+
+```{r}
+meta_ineligible_results = list(meta_data = list(engage_meta_ineligible, ease_meta_ineligible, success_meta_ineligible),
+                    term = alist(promotion_t, prevention_t)) %>% 
+  cross_df() %>% 
+  as.list() %>% 
+  purrr::pmap(.f = report_meta) %>% 
+  map_dfr(broom::tidy, .id = "model") %>% 
+  mutate(model = rfq_outcome) %>% 
+  separate(model, into = c("outcome", "rfq"), sep = "_") %>% 
+  select(-term, -type)
+```
+
+Comparing results with and without eligible participants.   
+```{r results='asis'}
+objects(pattern = "^meta(.*)results$") %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map_dfr(arrange, rfq, .id = "meta_result") %>% 
+  arrange(outcome, rfq) %>% 
+  split(.$outcome) %>% 
+  knitr::kable(digits = 3)
+```
+
+### S5: Without response time exclusion   
+Profile browsing experience with speedy completers. 
+```{r}
+library(lubridate)
+s5 %>% 
+  mutate(duration = time_length(StartDate %--% EndDate, unit = "minutes"),
+         rcs = median(duration, na.rm = T) / as.numeric(duration))
+```
+
+```{r}
+s5 %>% 
+  # mutate(duration = time_length(StartDate %--% EndDate, unit = "minutes")) %>% 
+  mutate(rcs = median(duration, na.rm = T) / as.numeric(duration),
+         exclusion_allduration = case_when(Finished == 1 &
+                                             attention_check == "pass" &
+                                             # duration > 360 &
+                                             response_consistency == "consistent" ~ "eligible",
+                                           TRUE ~ "ineligible"),
+         exclusion_rcs = case_when(Finished == 1 &
+                                             attention_check == "pass" &
+                                             # duration > 360 &
+                                             rcs < 2 & # relative completion time below 2 
+                                             response_consistency == "consistent" ~ "eligible",
+                                           TRUE ~ "ineligible")) %>% 
+  count(exclusion_allduration, exclusion_rcs)
+```
+
+```{r}
+s5 %>% 
+  mutate(rcs = median(duration, na.rm = T) / as.numeric(duration),
+         exclusion_allduration = case_when(Finished == 1 &
+                                             attention_check == "pass" &
+                                             rcs < 2 & # relative completion time below 2 
+                                             response_consistency == "consistent" ~ "eligible",
+                                           TRUE ~ "ineligible")) %>% 
+  # count(exclusion, exclusion_allduration)
+  filter(exclusion_allduration == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas")) %>% 
+  lm(cbind(engage, ease) ~ promotion.c + prevention.c,
+     data = .) %>% 
+  broom::tidy() %>% 
+  mutate(p.value = ifelse(p.value < 0.001, "< .001", gsub("^0.", "= .", sprintf("%0.2f", p.value))),
+         statistic = sprintf("%.2f", statistic),
+                apa_report = glue::glue("b = {estimate}, SE = {std.error}, t(169) = {statistic}, p {p.value}"))
+```
+Perceived success with speedy completers. 
+```{r}
+s5 %>% 
+  mutate(rcs = median(duration, na.rm = T) / as.numeric(duration),
+         exclusion_allduration = case_when(Finished == 1 &
+                                             attention_check == "pass" &
+                                             rcs < 2 & # relative completion time below 2 
+                                             response_consistency == "consistent" ~ "eligible",
+                                           TRUE ~ "ineligible")) %>% 
+  # count(exclusion_allduration)
+  filter(exclusion_allduration == "eligible") %>%
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas")) %>% 
+  lm(ods ~ promotion.c + prevention.c,
+     data = .) %>% 
+  broom::tidy() %>% 
+  mutate(p.value = ifelse(p.value < 0.001, "< .001", gsub("^0.", "= .", sprintf("%0.2f", p.value))),
+         statistic = sprintf("%.2f", statistic),
+                apa_report = glue::glue("b = {estimate}, SE = {std.error}, t(169) = {statistic}, p {p.value}"))
+```
+  
+
+### Interaction Effect of Regulatory Focus   
+
+We did not find significant interaction effect of regulatory focus on profile browsing experience in Studies 2 - 5.   
+```{r rfq_moderation_profile}
+objects(pattern = "^s[2-5]$") %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( dplyr::filter, exclusion == "eligible") %>% 
+  map(., ~lm(cbind(engage, ease) ~ promotion*prevention,
+     data = .)) %>% 
+  map(broom::tidy) %>% 
+  map_dfr(filter, term == "promotion:prevention", .id = "Study")
+```
+
+We find no significant interaction between promotion and prevention focus in Studies 1, 4, or 5.     
+```{r rfq_moderation_ods}
+objects(pattern = "^s1$|^s4$|^s5$") %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map(dplyr::filter, exclusion == "eligible") %>% 
+  map(., ~lm(ods ~ promotion*prevention,
+     data = .)) %>% 
+  map(broom::tidy) %>% 
+  map_dfr(filter, term == "promotion:prevention", .id = "Study")
+```
+
+
+
+
+### Subgroup analyses   
+#### Zero-order correlations   
+```{r results='asis'}
+# gender
+s5 %>% 
+  filter(exclusion == "eligible") %>% 
+  split(.$gender) %>% 
+  map(select,promotion, prevention, bas, bis, engage, ease, ods) %>% 
+  map(cor_keyvars) %>% 
+  map2(., names(.), 
+       ~knitr::kable(.x, 
+                     caption = paste0("Zero-Order Correlations between Key Measures for ", .y, "Participants")) )
+```
+
+```{r results='asis'}
+# white vs. nonwhite participants
+s5 %>% 
+  filter(exclusion == "eligible") %>% 
+  mutate(white_vs_nonwhite = replace_na(ethnicity_1, -1)) %>% 
+  split(.$white_vs_nonwhite) %>% 
+  map(select,promotion, prevention, bas, bis, engage, ease, ods) %>% 
+  map(cor_keyvars) %>% 
+  map2(., names(.), 
+       ~knitr::kable(.x, 
+                     caption = paste0("Zero-Order Correlations between Key Measures for ", .y, "Participants")) )
+```
+
+
+```{r results='asis'}
+s5 %>% 
+  filter(exclusion == "eligible") %>% 
+  mutate(age_grouped = case_when(
+    age < 26 ~ "younger than 25",
+    between(age, 26, 30) ~ "26 - 30",
+    between(age, 31, 36) ~ "31 - 36",
+    age > 36 ~ "37+",
+    TRUE ~ NA_character_)) %>% 
+  # count(age_grouped)
+  # group_by(age_grouped) %>% 
+  # summarize_at("age", list(min, max), na.rm = T)
+  split(.$age_grouped) %>% 
+  map(select,promotion, prevention, bas, bis, engage, ease, ods) %>% 
+  map(cor_keyvars) %>% 
+  map2(., names(.), 
+       ~knitr::kable(.x, 
+                     caption = paste0("Zero-Order Correlations between Key Measures for Participants ", .y)))
+```
+
+
+#### Gender  
+Gender was not a significant moderator of profile browsing experience nor perceived success.    
+```{r}
+objects(pattern = "^s1$|^s4$|^s5$") %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( dplyr::filter, exclusion == "eligible") %>% 
+  # map(centre_pred, c("promotion", "prevention")) %>% 
+  map(., ~lm(ods ~ promotion*prevention*gender,
+     data = .)) %>% 
+  # map(~car::Anova(., type = 3, p.adjust.method = "bonferroni"))
+  map_dfr(broom::tidy, .id = "study") %>% 
+  filter(str_detect(term, ":gendermale"))
+```
+
+
+```{r}
+# profile-browsing experience  
+objects(pattern = "^s[2-5]$", 
+        envir = .GlobalEnv) %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( filter, exclusion == "eligible") %>% 
+  # map(centre_pred, c("promotion", "prevention")) %>% 
+  map(~lm(cbind(engage, ease) ~ promotion*prevention*gender,
+     data = .)) %>% 
+  # map(~car::Anova(., type = 3, p.adjust.method = "bonferroni", multivariate = T))
+  map_dfr(broom::tidy, .id = "study") %>% 
+  filter(str_detect(term, ":gender")) 
+  
+```
+
+#### Age   
+##### Profile-browsing experience  
+Age was a significant moderator of profile browsing experience only in Study 2 and not in Studies 3, 4, and 5, suggesting a potential false-positive finding.   
+```{r include = render_html}
+objects(pattern = "^s[2-5]$", 
+        envir = .GlobalEnv) %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( filter, exclusion == "eligible") %>% 
+  map(., ~lm(cbind(ease, engage) ~ promotion*prevention*age,
+     data = .)) %>% 
+  map(car::Anova, type = 3, multivariate = T, adjust = "bonferroni") 
+  # map_dfr(broom::tidy, .id = "Study")  %>% 
+  # filter(str_detect(term, ":age") & p.value < .05)
+```
+
+
+##### Perceived Success  
+There were significant interactions between age and regulatory focus in predicting perceived success in Studies 4 and 5 but not in Study 1.   
+
+```{r}
+objects(pattern = "^s1$|^s4$|^s5$", 
+        envir = .GlobalEnv) %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( filter, exclusion == "eligible") %>% 
+  # map(mutate, age_grouped = ntile(age, 4)) %>% 
+  map(., ~lm(ods ~ promotion*prevention*age,
+     data = .)) %>% 
+  # map(~car::Anova(., type = 3, p.adjust.method = "holm"))
+  # map_dfr(broom::tidy, .id = "Study")  
+  map(broom::tidy)  %>% 
+  map_dfr(filter, term %in% c("promotion:age", "prevention:age", "promotion:prevention:age"),
+          .id = "Study")
+```
+
+```{r include = render_html}
+objects(pattern = "^s[4-5]$") %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( filter, exclusion == "eligible") %>% 
+  map_dfr(summarize_at, "age", list(mean = mean, sd = sd), na.rm = T,
+      .id = "study") %>% 
+  mutate(`-1SD` = mean - sd,
+         `+1SD` = mean + sd,
+         .before = sd)
+```
+
+```{r}
+rfq_interaction_by_age = function(study) {
+  lm_model = study %>% 
+    filter(exclusion == "eligible") %>% 
+    centre_pred(c("promotion", "prevention", "age")) %>% 
+    lm(ods ~ promotion.c*prevention.c*age.c,
+       data = .) %>%
+    emmeans::emmip(., promotion.c ~ prevention.c | age.c,
+                 at = list(promotion.c = c(1*sd(.$model$promotion.c, na.rm = T),
+                                           0,
+                                           -1*sd(.$model$promotion.c, na.rm = T)),
+                           prevention.c = c(1*sd(.$model$prevention.c, na.rm = T),
+                                            0,
+                                            -1*sd(.$model$prevention.c, na.rm = T)),
+                           age.c = c(1*sd(.$model$age.c, na.rm = T),
+                                     0,
+                                     -1*sd(.$model$age.c, na.rm = T))),
+      CIs = TRUE) + 
+    scale_y_continuous("Perceived Success",
+                       limits = c(1, 7)) +
+    theme_bw()
+}
+```
+
+```{r include = render_html}
+objects(pattern = "^s[4-5]$") %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map(rfq_interaction_by_age)
+```
+
+```{r include = render_html}
+objects(pattern = "^s[4-5]$") %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( filter, exclusion == "eligible") %>% 
+  map(centre_pred, c("promotion", "prevention", "age")) %>% 
+  map(., ~lm(ods ~ promotion.c*prevention.c*age.c,
+     data = .)) %>% 
+  map(., ~emmeans::emmeans(., ~ prevention.c + promotion.c | age.c,
+                   at = list(promotion.c = c(1*sd(.$model$promotion.c, na.rm = T),
+                                             0,
+                                             -1*sd(.$model$promotion.c, na.rm = T)),
+                             prevention.c = c(1*sd(.$model$prevention.c, na.rm = T),
+                                              0,
+                                              -1*sd(.$model$prevention.c, na.rm = T)),
+                             age.c = c(1*sd(.$model$age.c, na.rm = T),
+                                       0,
+                                       -1*sd(.$model$age.c, na.rm = T))))) %>% 
+  map(., ~emmeans::contrast(., "eff", 
+                    interaction = FALSE,
+                    by = "age.c", adjust = "holm",
+                    combine = TRUE)) %>% 
+  map_dfr(tidy, 
+          .id = "study") %>% 
+  filter(adj.p.value < .05)
+```
+
+Although age was a significant moderators in both Studies 4 and 5, the follow-up simple slopes tests revealed inconsistent patterns. Specifically, age moderated the relationship between regulatory focus and perceived success only among average or younger participants in Study 4 and only among older participants in Study 5. In Study 4, the negative association between prevention focus and perceived success was stronger when promotion focus was low relative to when it was average or high for those who with average age (i.e., 35 years old) and younger by 1 standard deviation (i.e., 25 years old). This, however, was not the case in older participants (i.e., those who are 45 years old or older). In Study 5, prevention focus was negatively associated with perceived success irrespective of the levels of promotion focus among younger (i.e., 22 years old) or average-aged (i.e., 32 years old) participants; however, the negative association of prevention focus with perceived success differed based on levels of promotion focus in older participants (i.e., 42 years old). Among older participants with high prevention focus, felt unsuccessful when their promotion focus was also average or low, but they felt successful when their promotion focus was high.  
+
+#### Ethnicity    
+To see if our findings are unique to white participants, we repeated the analyses with white race as a moderator. The analysis revealed that being white was not a significant moderator for profile-browsing experience nor perceived success. 
+
+
+```{r include = render_html}
+objects(pattern = "^s[2-5]$", 
+        envir = .GlobalEnv) %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( filter, exclusion == "eligible") %>% 
+  # recode white = 1; non-white = -1
+  map(mutate, white_vs_nonwhite = replace_na(ethnicity_1, -1)) %>% 
+  # map(select, ethnicity_1, white_vs_nonwhite) %>% 
+  # map(count, white_vs_nonwhite)
+  map(~lm(cbind(ease, engage) ~ promotion*prevention*white_vs_nonwhite,
+     data = .)) %>% 
+  map(car::Anova, type = 3, p.adjust.method = "holm", multivariate = T)
+  # map_dfr(broom::tidy, .id = "Study")  
+  # map(broom::tidy)  %>% 
+  # map_dfr(filter, term %in% c("promotion:age", "prevention:age", "promotion:prevention:age"),
+  #         .id = "Study")
+```
+
+For perceived success, regulatory focus became a nonsignificant predictor when white race was added to the model.  
+```{r include = render_html}
+objects(pattern = "^s1$|^s4$|^s5$", 
+        envir = .GlobalEnv) %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( filter, exclusion == "eligible") %>% 
+  # recode white = 1; non-white = -1
+  map(mutate, white_vs_nonwhite = replace_na(ethnicity_1, -1)) %>% 
+  # map(select, ethnicity_1, white_vs_nonwhite) %>% 
+  # map(count, white_vs_nonwhite)
+  # map(~lm(ods ~ white_vs_nonwhite,
+  #    data = .)) %>%
+  map(~lm(ods ~ promotion*prevention*white_vs_nonwhite,
+      data = .)) %>% 
+  map(car::Anova, type = 3, p.adjust.method = "holm")
+  # map_dfr(broom::tidy, .id = "Study")  
+  # map(broom::tidy)  %>% 
+  # map_dfr(filter, term %in% c("promotion:age", "prevention:age", "promotion:prevention:age"),
+  #         .id = "Study")
+```
+
+```{r include = render_html}
+plot_white_vs_nonwhite = function(study){
+  study %>% 
+  ggplot(aes(x = promotion,
+             y = ods,
+             color = as.factor(white_vs_nonwhite))) +
+  # stat_summary(fun = "mean",
+  #              geom = "bar") + 
+    geom_jitter() +
+    geom_smooth(method = lm)+
+    scale_color_manual("ethnicity", labels = c("nonwhite", "white"),
+                       values = c("#D55E00", "#999999")) +
+  theme_bw()
+}
+
+objects(pattern = "^s1$|^s4$|^s5$") %>% 
+  mget(envir = .GlobalEnv, mode = "list") %>% 
+  map(filter, exclusion == "eligible") %>% 
+  # recode white = 1; non-white = -1
+  map(mutate, white_vs_nonwhite = replace_na(ethnicity_1, -1)) %>% 
+  map(plot_white_vs_nonwhite)
+```
+
+```{r}
+objects(pattern = "^s1$|^s4$|^s5$") %>% 
+  mget(envir = .GlobalEnv, mode = "list") %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(mutate, white_vs_nonwhite = replace_na(ethnicity_1, -1)) %>% 
+  map(., ~lm(ods ~ promotion + prevention + as.factor(white_vs_nonwhite), 
+      data = .)) %>% 
+  # map(., ~lm(cbind(promotion, prevention) ~ as.factor(white_vs_nonwhite),
+  #            data = .)) %>%
+  # map(., ~lm(ods ~ as.factor(white_vs_nonwhite), 
+  #            data = .)) %>% 
+  # map(car::Anova, type = 3, p.adjust = "bonferroni")
+  map_dfr(broom::tidy, .id = "study")
+  # filter(term != "(Intercept)")
+```
+
+
+#### Education  
+There were no significant moderation by education level.   
+```{r}
+objects(pattern = "^s[2-5]$", 
+        envir = .GlobalEnv) %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( filter, exclusion == "eligible") %>% 
+  # map(count, education)
+  map(~lm(cbind(ease, engage) ~ promotion*prevention*as.factor(education),
+     data = .)) %>% 
+  map(car::Anova, type = 3, p.adjust.method = "holm", multivariate = T)
+```
+
+
+```{r}
+objects(pattern = "^s1$|^s4$|^s5$", 
+        envir = .GlobalEnv) %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map( filter, exclusion == "eligible") %>% 
+  map(~lm(ods ~ as.factor(education)*promotion*prevention,
+     data = .)) %>%
+  map(car::Anova, type = 3, p.adjust.method = "holm")
+```
+

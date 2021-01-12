@@ -1,0 +1,770 @@
+---
+title: "Frustrated or Engaged? Regulatory Focus Predicts Experiences with Online Dating"
+output:
+  word_document:
+    reference_docx: apa-styles.docx
+    df_print: kable
+  bookdown::html_document2:
+    code_folding: hide
+    theme: cosmo
+    highlight: tango
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+    df_print: paged
+    fig_width: 8
+    fig_height: 5
+  html_document:
+    toc: yes
+    df_print: paged
+  bibliography: r-references.bib
+---
+
+```{r setup, include=FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, cache = FALSE, highlight = TRUE)
+library("tidyverse"); library("corrr"); library("broom"); library("lavaan"); library("bookdown"); library("metafor")
+options(digits = 3, scipen = 999)
+set.seed(33333)
+
+# If rendering the document as html, change the following to TRUE
+render_html = FALSE
+# render_html = TRUE
+```
+
+```{r data_import, message = FALSE, include=FALSE}
+here::here("data") %>%
+  list.files()  %>%
+  purrr::map(function(file_name) {
+    assign(x = str_remove(file_name, "_anonymized_processed_data.csv"),
+           value = readr::read_csv(paste(here::here("data"), sep = "/", file_name)),
+           envir = .GlobalEnv)
+  })
+```
+
+```{r message = FALSE, include = FALSE}
+list.files(path = here::here("r-scripts"),
+           pattern = "*.R",
+           full.names = T) %>%
+  purrr::map(~source(.)) 
+```
+
+```{r}
+# correcting miscoded values in S4 
+# online dating success responses were erroneously assigned 11 ~ 17 instead of 1 to 7.
+s4 = s4 %>% 
+  mutate_at(vars(matches("suc_[0-9]")), ~{.x - 10})
+```
+
+# Studies 1 - 4: Meta-Analysis
+## Method
+### Participants
+```{r sample_size, include = render_html}
+n_1to5 <- objects(pattern = "^s[1-5]$") %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map(count, exclusion) %>% 
+  map_dfr(filter, exclusion == "eligible", .id = "study") %>% 
+  pull(n)
+```
+
+```{r exclusion_rate, include = render_html}
+(exclusion_rate = list(s1, s2, s3, s4, s5) %>% 
+   map(filter, Finished == 1) %>% # finished responses
+  map_dfr(count, exclusion, .id = "Study") %>% 
+  spread(exclusion, n) %>% 
+  mutate(exclusion_rate = (ineligible/(eligible+ineligible))*100))
+```
+The exclusion rates across the five studies, ranging from `r min(exclusion_rate$exclusion_rate)`% to `r max(exclusion_rate$exclusion_rate)`%, are within the expected range reported by previous research on online studies (Goodman et al., 2012). 
+
+```{r demo_gender, include = render_html}
+(demo_gender = objects(pattern = "^s[1-5]", envir = .GlobalEnv) %>% 
+   mget(envir = .GlobalEnv) %>% 
+   # list(s1, s2, s3, s4, s5) %>% 
+   map( filter, exclusion == "eligible") %>% 
+  map_dfr(count, exclusion, gender, name = "prop", .id = "Study") %>% 
+   group_by(Study) %>% 
+ mutate(gender_prop = glue::glue("{ round((prop/sum(prop, na.rm = T))*100, 2) }% {gender}"),
+        gender_prop = paste0(gender_prop, collapse = "; ")) %>% 
+   slice(1) %>% 
+   ungroup() %>% 
+   select(Study, gender_prop))
+```
+
+```{r demo_ethnicity, include = render_html}
+(demo_ethnicity = objects(pattern = "^s[1-5]", envir = .GlobalEnv) %>% 
+   mget(envir = .GlobalEnv) %>% 
+   # list(s1, s2, s3, s4, s5) %>% 
+  map_dfr(ethnicity, .id = "Study") %>% 
+   mutate(ethnicity = case_when(ethnicity == "ethnicity_1" ~ "Caucasian", 
+                                ethnicity == "ethnicity_2" ~ "African Descent", 
+                                ethnicity == "ethnicity_3" ~ "South American", 
+                                ethnicity == "ethnicity_4" ~ "Middle Eastern",
+                                ethnicity == "ethnicity_5" ~ "South Asian", 
+                                ethnicity == "ethnicity_6" ~ "Southeast Asian", 
+                                ethnicity == "ethnicity_7" ~ "East Asian",
+                                ethnicity == "ethnicity_8" ~ "First Nations",
+                                ethnicity == "ethnicity_9" ~ "Pacific Islander",
+                                TRUE ~ "other")) %>% 
+   group_by(Study) %>% 
+ mutate(ethnicity_prop = paste0(glue::glue("{ cum_perc } {ethnicity}"), collapse = "; ")) %>% 
+   slice(1) %>% 
+   ungroup() %>% 
+  # filter(ethnicity == "ethnicity_1") %>% 
+   dplyr::select(Study, ethnicity_prop)) # caucasian
+```
+```{r demo_age}
+(demo_age = objects(pattern = "^s[1-5]", envir = .GlobalEnv) %>% 
+   mget(envir = .GlobalEnv) %>% 
+   map_dfr(age, .id = "Study") %>% 
+   group_by(Study) %>% 
+   mutate(n = glue::glue("{sum(n)} [{n}]")) %>% 
+   ungroup() %>% 
+   filter(exclusion == "eligible") %>% 
+   mutate_if(is.double, round) %>% 
+  mutate(mean_age = glue::glue("$M$ = {age.m} ({age.min} - {age.max})")) %>% 
+   select(Study, n, mean_age))
+  # mutate(`N [eligible]` = str_c((ineligible+eligible), " [",eligible,"]"), .after = Study, .keep = "unused")
+   
+```
+Study characteristics (e.g., measures used) and participant demographics are summarized in Table \@ref(tab:study-information).
+```{r study-information}
+study_info = objects(pattern = "^demo_", envir = .GlobalEnv) %>% 
+   mget(envir = .GlobalEnv) %>% 
+   reduce(full_join, by = "Study")
+
+knitr::kable(study_info, caption = "Study Information and Sample Demographics for Studies")
+  # mutate(`N [eligible]` = str_c((ineligible+eligible), " [",eligible,"]"), .after = Study, .keep = "unused"))
+```
+
+  
+### Measures  
+#### Regulatory Focus in Relationship Scale   
+
+```{r include = render_html}
+(prevention_alpha = paste0("s", c(1:5)) %>% 
+  # list(s1, s2, s3, s4, s5) %>% 
+       mget(envir = .GlobalEnv) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, matches("^RFQ_M_[1-7]")) %>% # prevention items
+  map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "Study"))
+```
+
+Prevention focus ($a$ = `r paste(round(prevention_alpha$raw_alpha, 2), sep = ", ")`)
+
+```{r include = render_html}
+(promotion_alpha = paste0("s", c(1:5)) %>% 
+  # list(s1, s2, s3, s4, s5) %>% 
+       mget(envir = .GlobalEnv) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, paste("RFQ_M", 8:15, sep = "_")) %>% # promotion items
+  map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "Study"))
+```
+
+Promotion focus ($a$ = `r paste(round(promotion_alpha$raw_alpha, 2), sep = ", ")`)
+
+#### Online Dating Success   
+```{r include = render_html}
+(success_alpha = paste0("s", c(1, 4, 5)) %>% 
+  # list(s1, s4, s5) %>% 
+       mget(envir = .GlobalEnv) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, matches("^suc_[0-9]{1,2}")) %>% 
+  map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "Study"))
+```
+
+Online dating success ($a$ = `r paste(round(success_alpha$raw_alpha, 2), sep = ", ")`)
+
+#### Engagement and Ease   
+```{r include = render_html}
+(engagement_alpha = paste0("s", c(2:5)) %>% 
+  # list(s2, s3, s4, s5) %>% 
+       mget(envir = .GlobalEnv) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, matches("^engage_[1-3]")| matches("^overall_engagement_[1-3]")) %>% 
+  map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "Study"))
+```
+Engagement ($a$ = `r paste(round(engagement_alpha$raw_alpha, 2), sep = ", ")`)   
+
+```{r include = render_html}
+(ease_alpha = paste0("s", c(2:5)) %>% 
+  # list(s2, s3, s4, s5) %>% 
+       mget(envir = .GlobalEnv) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, matches("^ease_[1-2|4]")| matches("^overall_ease_[1|3|5]")) %>% 
+  map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "Study"))
+```
+Ease ($a$ = `r paste(round(ease_alpha$raw_alpha, 2), sep = ", ")`)   
+
+
+See Table \@ref(tab:scale-descriptives) for descriptive statisitcs of key variables. 
+```{r scale-descriptives}
+objects(pattern = "_alpha$") %>%
+  mget(envir = .GlobalEnv, mode = "list") %>% 
+  map_dfr(dplyr::select, Study, mean, sd, raw_alpha, .id = "outcome") %>% 
+  mutate_if(is.double, ~sprintf("%.2f", .)) %>% 
+  mutate(desc_stat = glue::glue("$M$ = {mean} ($SD$ = {sd}); $a$ = {raw_alpha}"),
+         outcome = str_remove_all(outcome, "_alpha$")) %>% 
+  dplyr::select(outcome, Study, desc_stat) %>% 
+  pivot_wider(id_cols = outcome,
+              names_from = Study, 
+              # names_glue = "Study {.name}",
+              values_from = desc_stat) %>% 
+  dplyr::select(outcome, paste0("s", 1:5)) %>% 
+  knitr::kable(caption = "Descriptive statistics of key variables")
+```
+
+
+The bivariate correlations between key measures in Study 1 \@ref(tab:bivariate-correlations-s1)  
+```{r bivariate-correlations-s1}
+s1 %>% 
+  filter(exclusion == "eligible") %>% 
+  select(promotion, prevention, ods) %>% 
+  cor_keyvars() %>% 
+  knitr::kable(caption = "Bivariate Correlations Between Key Measures in Study 1.")
+```
+
+in Studies 2 and 3, and
+```{r results='asis'}
+objects(pattern = "^s[2-3]") %>% 
+  mget(envir = .GlobalEnv, mode = "list") %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(select, promotion, prevention, engage, ease) %>% 
+  map(cor_keyvars) %>% 
+  map(knitr::kable)
+```
+
+in Study 4 \@ref(tab:bivariate-correlations-s4).   
+```{r bivariate-correlations-s4}
+s4 %>% 
+  filter(exclusion == "eligible") %>% 
+  select(promotion, prevention, engage, ease, ods) %>% 
+  cor_keyvars() %>% 
+  knitr::kable(caption = "Bivariate Correlations Between Key Measures in Study 4.")
+```
+
+### Analytic Strategy  
+
+```{r regression_meta}
+# regressing RFQ (promotion and prevention) on y 
+regression_meta <- function(df, y) {
+  lmfit <- df %>% 
+    # filter(exclusion == "eligible") %>% # excluding ineligible participants
+    centre_pred(var = c("promotion", "prevention")) %>% # centring predictors
+    lm(eval(rlang::sym(y)) ~ promotion.c + prevention.c, # fit regression
+       data = .)
+  list(r2 = broom::glance(lmfit)$r.squared, # regression model R2
+       promotion_t = broom::tidy(lmfit)$statistic[2], # t-value 
+       prevention_t = broom::tidy(lmfit)$statistic[3],
+       promotion_b = broom::tidy(lmfit)$estimate[2], # estimate
+       prevention_b = broom::tidy(lmfit)$estimate[3],
+       promotion_se = broom::tidy(lmfit)$std.error[2], # std. error
+       prevention_se = broom::tidy(lmfit)$std.error[3],
+       promotion_p = broom::tidy(lmfit)$p.value[2], # p-value
+       prevention_p = broom::tidy(lmfit)$p.value[3]) 
+}
+```
+
+```{r engage_stats, include = render_html}
+# predictor: `engagement` with the same items across studies  
+(engage_meta <- list(s2, s3, s4, s5) %>% 
+   map(filter, exclusion == "eligible") %>% 
+   map_dfr(regression_meta, y = "engage", .id = "Study") %>% 
+   mutate(ni = n_1to5[-1],
+          Study = 2:5))
+```
+```{r ease_stats, include = render_html}
+(ease_meta <- list(s2, s3, s4, s5)  %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map_dfr(regression_meta, y = "ease", .id = "Study") %>% 
+   mutate(ni = n_1to5[-1],
+          Study = 2:5))
+```
+```{r success_stats, include = render_html}
+(success_meta <- list(s1, s4, s5) %>% 
+   map(filter, exclusion == "eligible") %>% 
+  map_dfr(regression_meta, y = "ods", .id = "Study") %>% 
+   mutate(ni = n_1to5[c(1, 4, 5)],
+          Study = c(1, 4, 5)))
+```
+
+```{r include = render_html}
+# combination of outcome (engagement, ease, and success) and RFQ (promotion and prevention)
+meta_dataset = list(meta_data = list(engage_meta, ease_meta, success_meta),
+                    term = alist(promotion_t, prevention_t)) %>% 
+  cross_df() %>% 
+  as.list() 
+
+rfq_outcome = apply(expand.grid(c("engage", "ease", "success"), c("prom", "prev")), 1, paste, collapse = "_")
+```
+
+```{r}
+spcor = function(meta_data, term) {
+  meta_data = meta_data %>%
+    dplyr::select(ti = !!term,
+                  r2i = r2,
+                  ni = ni,
+                  Study) %>% 
+    mutate(mi = rep(3, nrow(.)))
+  
+  spcor_result  = metafor::escalc(data = meta_data,
+                measure = "SPCOR", # semi-partial correlation
+                ti = ti, 
+                r2i = r2i,
+                ni =  ni,
+                mi = mi, # number of predictors
+                slab = paste0(Study, " [N = ", ni, "]")) 
+    
+  return(spcor_result) 
+}
+```
+
+See Table \@ref(tab:effect-size) for the individual effect size estimates from each study that were used in the meta-analyses.   
+```{r effect-size}
+meta_dataset %>% 
+  purrr::pmap_dfr(.f = spcor, .id = "outcome_rfq") %>% 
+  tibble() %>% 
+  mutate(outcome_rfq = rep(rfq_outcome, c(4, 4, 3, 4, 4, 3))) %>% 
+  # separate(outcome_rfq, into = c("rfq", "outcome"), sep = "_") %>% 
+  dplyr::select(Study, outcome_rfq, yi) %>% 
+  spread(outcome_rfq, yi) %>% 
+   mutate_at(vars(-Study), ~sprintf("%.2f", .)) %>% 
+  dplyr::select(Study, engage_prom, engage_prev, ease_prom, ease_prev, success_prom, success_prev) %>% 
+  # dplyr::select(Study, starts_with("engage_"), starts_with("ease_"), starts_with("success_")) %>% 
+  # papaja::apa_table(caption = "Effect Size Estimates in Semi-Partial Correlation Coefficients")
+  knitr::kable(caption = "Effect Size Estimates in Semi-Partial Correlation Coefficients")
+```
+
+
+
+```{r heterogeneity}
+q_stats = list(meta_data = list(engage_meta, ease_meta, success_meta), # data containing effect sizes
+                    term = alist(promotion_t, prevention_t)) %>%  # predictors
+  cross_df() %>% 
+  as.list() %>% 
+  purrr::pmap(.f = report_meta) %>% 
+  map_dfr(broom::glance, .id = "model") %>% 
+  mutate(model = c("engage_prom",  "ease_prom", "success_prom", "engage_prev", "ease_prev", "success_prev"),
+         p.value.cochran.qe = ifelse(p.value.cochran.qe < 0.001, "< .001", 
+                                     gsub("^0.", "= .", sprintf("%0.2f", p.value.cochran.qe))),
+         cochran.qe = round(cochran.qe, 2),
+         apa_report = glue::glue("$Q$({df.residual}) = {cochran.qe}, $p$ {p.value.cochran.qe}"))
+```
+
+engagement as an outcome and promotion, `r q_stats$apa_report[q_stats$model=="engage_prom"]`, and prevention, `r q_stats$apa_report[q_stats$model=="engage_prev"]`, focus as predictors.
+
+ease as an outcome and promotion, `r q_stats$apa_report[q_stats$model=="ease_prom"]`, and prevention, `r q_stats$apa_report[q_stats$model=="ease_prev"]`, focus as predictors.
+
+success as an outcome and promotion, `r q_stats$apa_report[q_stats$model=="success_prom"]`, and prevention, `r q_stats$apa_report[q_stats$model=="success_prev"]`, focus as predictors.
+
+## Results and Discussion  
+
+### Meta-Analyses of the Associations between Regulatory Focus and Online Dating Experience and Success
+
+```{r meta_results, include = render_html}
+meta_results = meta_dataset %>% 
+  purrr::pmap(.f = report_meta) %>% 
+  map_dfr(broom::tidy, .id = "model") %>% 
+  mutate(model = rfq_outcome) %>% 
+  separate(model, into = c("outcome", "rfq"), sep = "_") %>% 
+  select(-term, -type)
+```
+
+```{r meta_engage, include = render_html}
+meta_results %>% filter(outcome == "engage")
+```
+
+The first meta-analysis with engagement as an outcome revealed that the overall effects of promotion focus `r meta_summary(meta_results)[[1]]`, and prevention focus, `r meta_summary(meta_results)[[4]]` were positive and significant. 
+
+```{r meta_ease, include = render_html}
+meta_results %>% filter(outcome == "ease")
+```
+The second meta-analysis with ease as an outcome revealed that promotion focus had a significant positive association with ease, `r meta_summary(meta_results)[[2]]`, whereas prevention focus had a significant negative association, `r meta_summary(meta_results)[[5]]`, with ease of browsing online dating profiles.
+
+
+```{r ease_reml, include = render_html}
+(ease_reml = c("promotion_t", "prevention_t") %>% 
+  map(report_meta, meta_data = ease_meta, method = "REML") %>% 
+  map_dfr(broom::tidy, .id = "rfq") %>% 
+  mutate(rfq = c("promotion", "prevention")))
+```
+
+A random effects test of the overall effects of promotion (`r meta_summary(ease_reml)[[1]]`) and prevention (`r meta_summary(ease_reml)[[2]]`) focus on ease were also significant and comparable to those of the fixed model. 
+
+```{r meta_success, include = render_html}
+meta_results %>% filter(outcome == "success")
+```
+
+Next, we examined the overall effects of promotion and prevention focus on perceived success in online dating. Whereas promotion focus was positively associated, `r meta_summary(meta_results)[[3]]`, prevention focus was negatively associated, `r meta_summary(meta_results)[[6]]`, with feeling generally successful using online dating. 
+
+
+### Exploratory Mediation Analyses
+
+```{r}
+promotion_ods_model <- '
+  # regressions
+  ods ~ b1*engage + b2*ease + c1*promotion + prevention
+
+  engage ~ a1*promotion + prevention
+  ease ~ a2*promotion + prevention
+  
+  engage ~~ ease
+
+  # indirect paths
+  engage_indirect := a1 * b1
+  ease_indirect := a2 * b2
+  
+  total_indirect := (a1 * b1) + (a2 * b2)
+  
+  # total
+  direct := c1
+  total := c1 + (a1 * b1) + (a2 * b2)
+'
+```
+
+```{r cache = TRUE}
+prom_mediation_raw = objects(pattern = "^s[4-5]$") %>% 
+  mget(envir = .GlobalEnv) %>% 
+  map(filter, exclusion == "eligible") %>% 
+  map(~mutate_at(., vars(c("engage", "ease", "promotion", "prevention")), mean_x)) %>% 
+  map(~sem(promotion_ods_model, 
+           data = .x,
+           se = "bootstrap",
+           bootstrap = 5000)) 
+```
+
+```{r prom_mediation, cache = TRUE}
+prom_mediation = prom_mediation_raw %>% 
+  map_dfr(standardizedSolution, output = "pretty",
+          .id = "study") %>% 
+   mutate_at(c("est.std", "se", "z", "ci.lower", "ci.upper"), ~sprintf("%0.3f", .)) %>% 
+   mutate(pvalue = ifelse(pvalue < 0.001, "< .001", gsub("^0.", "= .", sprintf("%0.2f", pvalue))),
+          apa_result = glue::glue("{est.std}, $SE$ = {se}, 95% CI [{ci.lower}, {ci.upper}], $z$ = {z}, $p$ {pvalue}"))
+```
+
+```{r include = render_html}
+prom_mediation %>% 
+  mutate(label = glue::glue("{lhs} {op} {rhs}"), 
+      .after = study) %>% 
+  dplyr::select(study, label, est.std:ci.upper)
+```
+
+  Using Study 4, we conducted two exploratory mediation analyses separately for promotion and prevention focus as predictors. The mediation analysis with promotion focus as a predictor revealed a significant indirect effect through engagement, $a_1b_1$ = `r prom_mediation$apa_result[prom_mediation$study == "s4" & prom_mediation$lhs == "engage_indirect"]`, but a nonsignificant effect through ease, $a2b2$ = `r prom_mediation$apa_result[prom_mediation$study=="s4" & prom_mediation$lhs == "ease_indirect"]`. The total effect of promotion focus on online dating success, c = `r prom_mediation$apa_result[prom_mediation$study=="s4" & prom_mediation$lhs == "total"]`, was no longer significant when the two indirect effects were taken into account, c’ = `r prom_mediation$apa_result[prom_mediation$study=="s4" & prom_mediation$lhs == "direct"]`.
+
+
+```{r}
+# with ease + engage as mediators (in light of the meta-analysis result excluding the follow-up)
+prevention_ods_model <- '
+  # regressions
+  ods ~ b1*engage + b2*ease + c1*prevention + promotion
+
+  engage ~ a1*prevention + promotion
+  ease ~ a2*prevention + promotion
+  
+  engage ~~ ease
+
+  # indirect paths
+  engage_indirect := a1 * b1
+  ease_indirect := a2 * b2
+  
+  total_indirect := (a1 * b1) + (a2 * b2)
+  
+  # total
+  direct := c1
+  total := c1 + (a1 * b1) + (a2 * b2)
+'
+```
+
+
+```{r cache = TRUE}
+prev_mediation_raw = objects(pattern = "^s[4-5]$") %>% 
+   mget(envir = .GlobalEnv) %>% 
+   map(filter, exclusion == "eligible") %>% 
+   map(~mutate_at(., vars(c("engage", "ease", "prevention", "promotion")), mean_x)) %>% 
+   map(~sem(prevention_ods_model, 
+            data = .x,
+            se = "bootstrap",
+            bootstrap = 5000)) 
+
+```
+
+```{r prev_medation, cache = TRUE}
+prev_mediation = prev_mediation_raw %>% 
+   map_dfr(standardizedSolution, 
+           output = "pretty",
+           .id = "study") %>% 
+   mutate_at(c("est.std", "se", "z", "ci.lower", "ci.upper"), ~sprintf("%0.3f", .)) %>% 
+   mutate(pvalue = ifelse(pvalue < 0.001, "< .001", gsub("^0.", "= .", sprintf("%0.2f", pvalue))),
+          apa_result = glue::glue("{est.std}, $SE$ = {se}, 95% CI [{ci.lower}, {ci.upper}], $z$ = {z}, $p$ {pvalue}"))
+```
+
+```{r include = render_html}
+prev_mediation %>% 
+  mutate(label = glue::glue("{lhs} {op} {rhs}"), 
+      .after = study) %>% 
+  dplyr::select(study, label, est.std:ci.upper)
+```
+
+  We next examined whether the prevention focus is associated with online dating success indirectly through a difficult profile browsing experience. The analysis revealed nonsignificant indirect effects through engagement, $a_1b_1$ = `r prev_mediation$apa_result[prev_mediation$study=="s4" & prev_mediation$lhs == "engage_indirect"]`, and ease, $a_2b_2$ = `r prev_mediation$apa_result[prev_mediation$study=="s4" & prev_mediation$lhs == "ease_indirect"]`. The total effect of prevention focus on online dating success was significant, $c$ = `r prev_mediation$apa_result[prev_mediation$study=="s4" & prev_mediation$lhs == "total"]`, and remained significant when the indirect effects through online dating experience were taken into account, $c’$ = `r prev_mediation$apa_result[prev_mediation$study=="s4" & prev_mediation$lhs == "direct"]`.
+
+# Study 5: Preregistered Replication  
+## Method  
+### Participants   
+
+```{r include = render_html}
+library(lubridate)
+
+s5 %>% 
+  mutate(duration = time_length(as.duration(StartDate %--% EndDate), unit = "minutes")) %>% 
+  # mutate(duration = minute(seconds_to_period(EndDate - StartDate))) %>% 
+  # group_by(exclusion) %>% 
+  summarise_at("duration", list(mean_duration = mean, sd_duration = sd), na.rm = T) 
+```
+
+Of these `r length(s5$PROLIFIC_PID)` participants, `r length(which(s5$exclusion=="ineligible"))` participants were excluded from analyses based on three preregistered criteria: failing attention check, providing inconsistent responses, and/or taking less than 6 minutes to complete the 12-minute ($X_{duration}$ = 11.90 minutes, SD = `r 586/60` minutes) questionnaire. 
+
+The final sample of `r length(which(s5$exclusion=="eligible"))` eligible participants with an average age of `r study_info$mean_age[study_info$Study == "s5"]`.  
+```{r include = render_html}
+study_info %>% 
+  filter(Study == "s5")
+```
+were 79 female, 66 male, and 4 non-binary individuals.	
+```{r include = render_html}
+s5 %>% 
+  filter(exclusion == "eligible") %>% 
+  count(gender)
+```
+
+### Measures  
+#### Social Motive Measures  
+```{r include = render_html}
+list(prevention_alpha, promotion_alpha) %>% 
+  map_dfr(filter, Study == "s5", .id = "RFQ") %>% 
+  mutate(RFQ = c("prevention", "promotion"))
+```
+
+```{r}
+list(select(s5[s5$exclusion=="eligible", ], matches("^bis_[0-9]")), #bis
+     select(s5[s5$exclusion=="eligible", ], matches("^bas\\w_[0-9]"))) %>%  # bas
+    map(psych::alpha, check.keys = TRUE) %>% 
+  map_dfr("total", .id = "bisbas") %>% 
+  mutate_if(is.double, ~sprintf("%.3f", .)) %>% 
+  mutate(bisbas = c("bis", "bas"),
+         desc_stat = glue::glue("$M$ = {mean}, ($SD$ = {sd}); $a$ = {raw_alpha}")) %>% 
+  select(bisbas, desc_stat) %>% 
+  knitr::kable(caption = "Descriptive statistics of general approach-avoidance motivations")
+```
+
+
+```{r include = render_html}
+s5 %>% 
+  filter(exclusion == "eligible") %>% 
+  dplyr::select(promotion, bas, prevention, bis) %>% 
+  corrr::correlate()
+```
+```{r include = render_html}
+(r_appavo = list(select(s5[s5$exclusion=="eligible", ], promotion, prevention), # prom & bas
+     select(s5[s5$exclusion=="eligible", ], bas, bis)) %>%  # prev & bis
+  pmap(cor.test) %>% 
+  map_dfr(broom::tidy, .id = "app_avo") %>% 
+  mutate(app_avo = c("prom_bas", "prev_bis"),
+         p.value = sprintf("%.3f", p.value),
+         estimate = round(estimate, 3),
+         apa_report = glue::glue("$r$({parameter}) = {estimate}, $p$ = {p.value}")) %>% 
+  dplyr::select(-method, -alternative))
+```
+
+Promotion focus was positively associated with BAS, `r r_appavo$apa_report[r_appavo$app_avo == "prom_bas"]`, and prevention focus was positively associated with BIS, `r r_appavo$apa_report[r_appavo$app_avo == "prev_bis"]`.
+
+## Results and Discussion   
+See Table \@ref(tab:bivariate-correlations-s5) for the bivariate correlations between key measures in Study 5.  
+```{r bivariate-correlations-s5}
+# correlation tables of key measures 
+s5 %>% 
+  filter(exclusion == "eligible") %>% 
+  dplyr::select(prevention, promotion, 
+                bis, bas, 
+                engage, ease, ods) %>% 
+  cor_keyvars() %>% 
+  knitr::kable(caption = "Zero-order Correlations of Key Measures")
+```
+
+See Supplemental Materials for the bivariate correlations broken down by demographics information.  
+
+### Replication of Meta-Analyzed Effects of Promotion and Prevention Focus  
+#### Online Dating Experience. 
+
+```{r s5_experience}
+s5_experience_rfq = s5 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas")) %>% 
+  lm(cbind(engage, ease) ~ promotion.c + prevention.c,
+     data = .)
+```
+
+
+```{r include = render_html}
+car::Anova(s5_experience_rfq, type = 3, digits = 4) %>% 
+  summary(multivariate = T, univariate = F, "Pillai")
+```
+
+The analysis replicated our findings; both promotion, V = 0.064, F(2, 146) = 5.03, p = .0077,  and prevention focus, V = 0.087, F(2, 146) = 6.98, p = .0013, were significant predictors of engagement and ease of browsing profiles. 
+
+
+```{r include = render_html}
+(s5_exp_regressions = broom::tidy(s5_experience_rfq) %>% 
+  mutate_at(vars(estimate:statistic), round, 3) %>%
+  mutate(p.value = ifelse(p.value < 0.001, "< .001", gsub("^0.", "= .", sprintf("%0.2f", p.value))),
+         apa_report = glue::glue("$b$ = {estimate}, $SE$ = {std.error}, $t$(147) = {statistic}, $p$ {p.value}")))
+```
+
+  Consistent with the meta-analytic findings, engagement while browsing online dating profiles was positively predicted by promotion focus, `r s5_exp_regressions$apa_report[s5_exp_regressions$term == "promotion.c" & s5_exp_regressions$response=="engage"]`, but not predicted by prevention focus, `r s5_exp_regressions$apa_report[s5_exp_regressions$term == "prevention.c" & s5_exp_regressions$response=="engage"]`. Contrary to our predictions, promotion focus was not a significant predictor of ease while browsing dating profiles, `r s5_exp_regressions$apa_report[s5_exp_regressions$term == "promotion.c" & s5_exp_regressions$response=="ease"]`, although results were in the expected direction. As predicted, prevention focus negatively predicted ease of use, `r s5_exp_regressions$apa_report[s5_exp_regressions$term == "prevention.c" & s5_exp_regressions$response=="ease"]`. 
+  
+#### Online Dating Success.  
+```{r}
+s5_ods_rfq = s5 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention")) %>% 
+  lm(ods ~ promotion.c + prevention.c , 
+     data = .) 
+```
+
+```{r}
+s5_ods_omnibus = car::Anova(s5_ods_rfq) %>% 
+  broom::tidy() %>% 
+  filter(term != "Residuals") %>% 
+  mutate(p.value = ifelse(p.value < 0.001, "< .001", gsub("^0.", "= .", sprintf("%0.2f", p.value))),
+         statistic = sprintf("%.2f", statistic),
+                apa_report = glue::glue("$F$({df}, 147) = {statistic}, $p$ {p.value}"))
+```
+
+
+A multiple linear regression analysis with online dating success and both promotion and prevention focus as predictors replicated the meta-analysis: There were significant main effects of promotion focus, `r s5_ods_omnibus$apa_report[s5_ods_omnibus$term =="promotion.c"]`, and prevention focus, `r s5_ods_omnibus$apa_report[s5_ods_omnibus$term =="prevention.c"]`. 
+
+```{r}
+(s5_ods_regressions = s5_ods_rfq %>% 
+  broom::tidy() %>%
+  mutate_at(vars(estimate:statistic), round, 3) %>%
+  mutate(p.value = ifelse(p.value < 0.001, "< .001", gsub("^0.", "= .", sprintf("%0.2f", p.value))),
+         apa_report = glue::glue("$b$ = {estimate}, $SE$ = {std.error}, $t$(147) = {statistic}, $p$ {p.value}")))
+```
+
+The follow-up univariate analysis revealed that perceived success in online dating was positively predicted by promotion focus, `r s5_ods_regressions$apa_report[s5_ods_regressions$term =="promotion.c"]`, and negatively predicted by prevention focus, `r s5_ods_regressions$apa_report[s5_ods_regressions$term =="prevention.c"]`. 
+
+### Exploratory Mediation Analysis  
+```{r include = render_html}
+prom_mediation %>% 
+  filter(study == "s5")
+```
+
+  The mediation analysis with promotion focus as a predictor was consistent with our findings from Study 4. There was a significant indirect effect between promotion focus and perceived success through engagement, $a_1b_1$ = `r prom_mediation$apa_result[prom_mediation$study=="s5" & prom_mediation$lhs == "engage_indirect"]`, and a nonsignificant indirect effect through ease, $a_2b_2$ = `r prom_mediation$apa_result[prom_mediation$study=="s5" & prom_mediation$lhs == "ease_indirect"]`. We also found a significant total effect of promotion focus on perceived success, c = `r prom_mediation$apa_result[prom_mediation$study=="s5" & prom_mediation$lhs == "total"]`, which became nonsignificant when the indirect effects were taken into account, c’ = `r prom_mediation$apa_result[prom_mediation$study=="s5" & prom_mediation$lhs == "direct"]`. 
+
+```{r include = render_html}
+prev_mediation %>% 
+  filter(study == "s5")
+```
+
+The mediation analysis result with prevention focus as a predictor was inconsistent with that of Study 4 that found no mediation effect through engagement or ease. Although the indirect effect through engagement was nonsignificant, $a_1b_1$ = `r prev_mediation$apa_result[prev_mediation$study== "s5" & prev_mediation$lhs == "engage_indirect"]`, which is consistent with Study 4; the indirect effect through ease, $a_2b_2$ = `r prev_mediation$apa_result[prev_mediation$study== "s5" & prev_mediation$lhs == "ease_indirect"]`, was significant in Study 5. The significant total effect of prevention focus on online dating success ($c$ = `r prev_mediation$apa_result[prev_mediation$study== "s5" & prev_mediation$lhs == "total"]`) was no longer significant $c’$ = `r prev_mediation$apa_result[prev_mediation$study== "s5" & prev_mediation$lhs == "direct"]` when the indirect effects were taken into account. 
+
+### Social Motives in Online Dating
+
+```{r include = render_html}
+s5_experience_appavo = s5 %>% 
+    filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas", 
+                      "rfq_prom", "rfq_prev")) %>% 
+  lm(cbind(engage, ease) ~ promotion.c + prevention.c + bis.c + bas.c,
+     data = .)
+```
+
+```{r include = render_html}
+car::Anova(s5_experience_appavo, type = 3) %>% 
+  summary(multivariate = TRUE, "Pillai", digits = 3)
+```
+
+When all four measures of approach and avoidance motivation are entered simultaneously, profile-browsing experience as a whole was significantly predicted by promotion focus, $V$ = 0.048, $F$(2, 144) = 3.64, $p$ = .029,  and prevention focus, $V$ = 0.044, $F$(2, 144) = 3.33, $p$ = .039, but not by BAS, $V$ = 0.020, $F$(2, 144) = 1.48, $p$ = .23, or BIS, $V$ = 0.023, $F$(2, 144) = 1.70, $p$ = .19. 
+
+```{r include = render_html}
+(s5_exp_appavo_regressions = s5_experience_appavo %>% 
+   broom::tidy() %>%
+   mutate_at(vars(estimate:statistic), round, 3) %>%
+   mutate(p.value = ifelse(p.value < 0.001, "< .001", gsub("^0.", "= .", sprintf("%0.2f", p.value))),
+          apa_report = glue::glue("$b$ = {estimate}, $SE$ = {std.error},
+                                  $t$({s5_experience_appavo$df.residual}) = {statistic}, $p$ {p.value}")))
+```
+
+Univariate analyses revealed that engagement was significantly predicted by promotion focus, `r s5_exp_appavo_regressions$apa_report[s5_exp_appavo_regressions$term == "promotion.c" & s5_exp_appavo_regressions$response=="engage"]`, and ease was significantly predicted by prevention focus, `r s5_exp_appavo_regressions$apa_report[s5_exp_appavo_regressions$term == "prevention.c" & s5_exp_appavo_regressions$response=="ease"]`.
+
+
+BIS and BAS were not significant predictors of engagement and ease (see Table \@ref(tab:uni-appavo) for the full model estimates), suggesting regulatory focus might be associated with online dating experience above and beyond general social motives. 
+
+```{r}
+s5_ods_appavo_lm = s5 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas")) %>% 
+  lm(ods ~ promotion.c + prevention.c + bis.c + bas.c ,
+     data = .) 
+
+s5_ods_appavo = s5_ods_appavo_lm %>% 
+   broom::tidy() %>%
+   mutate_at(vars(estimate:statistic), round, 3) %>%
+   mutate(p.value = ifelse(p.value < 0.001, "< .001", gsub("^0.", "= .", sprintf("%0.2f", p.value))),
+          apa_report = glue::glue("$b$ = {estimate}, $SE$ = {std.error}, $t$({s5_ods_appavo_lm$df.residual}) = {statistic}, $p$ {p.value}"))
+```
+
+We then examined subjective success in online dating and its associations with approach and avoidance motivations. With BIS/BAS as covariates, promotion (`r s5_ods_appavo$apa_report[s5_ods_appavo$term == "promotion.c"]`) and prevention (`r s5_ods_appavo$apa_report[s5_ods_appavo$term == "prevention.c"]`) focus were no longer significant predictors of online dating success. In addition, neither BAS, `r s5_ods_appavo$apa_report[s5_ods_appavo$term == "bas.c"]`, nor BIS, `r s5_ods_appavo$apa_report[s5_ods_appavo$term == "bis.c"]`, was a significant predictor of online dating success.
+
+
+```{r uni-appavo}
+full_join(s5_exp_appavo_regressions, s5_ods_appavo) %>% 
+  mutate(response = ifelse(is.na(response), "Online Dating Success", str_to_title(response))) %>% 
+  mutate_at("p.value", ~str_remove_all(., paste(c("=" , "<"), collapse = "|"))) %>% 
+  mutate_at("term", ~str_replace_all(., c("promotion.c" = "Promotion",
+                                          "prevention.c" = "Prevention",
+                                          "bis.c" = "BIS" ,
+                                          "bas.c" = "BAS"))) %>% 
+  rename(Outcome = "response",
+    Variable = "term",
+         SE = "std.error",
+         `$t$(145)` = "statistic",
+         p = "p.value") %>% 
+  select(-apa_report) %>% 
+  knitr::kable(caption = "Univariate Estimates of the Full Models for Approach and Avoidance Motivation Measures")
+```
+
+```{r include = render_html}
+s5 %>% 
+  filter(exclusion == "eligible") %>% 
+  centre_pred(var = c("promotion", "prevention", 
+                      "bis", "bas")) %>% 
+  lm(ods ~ promotion.c + prevention.c + bis.c + bas.c ,
+     data = .) %>% 
+  sjPlot::tab_model(show.stat = TRUE, show.se = TRUE, show.std = "std", string.stat = "\bt",
+                    dv.labels = "Online Dating Success")
+```
+
+
+# Supplemental Materials   
+## Scale Validation  
+```{r child="pr_supplemental_materials.Rmd"}
+```
+
+## Exploratory analyses   
+```{r child="pr_r&r_supplemental_materials.Rmd"}
+```
+# References   
+```{r}
+# citing R and r-pacakges 
+papaja::r_refs(file = "r-references.bib")
+my_citations <- papaja::cite_r(file = "r-references.bib")
+```
+
+`r my_citations`
+
